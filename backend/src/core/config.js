@@ -4,6 +4,8 @@ const path = require("path");
 
 function readConfig() {
   const projectRoot = path.resolve(__dirname, "..", "..", "..");
+  loadEnvFile(path.join(projectRoot, "backend", ".env"));
+  loadEnvFile(path.join(projectRoot, "backend", ".env.local"));
   const cyberbossProjectRoot = resolveExistingPath([
     process.env.CYBERBOSS_PROJECT_ROOT,
     path.resolve(projectRoot, "..", "cyberboss"),
@@ -70,6 +72,35 @@ function resolveExistingPath(candidates) {
     }
   }
   return "";
+}
+
+function loadEnvFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return;
+  }
+  const text = fs.readFileSync(filePath, "utf8");
+  for (const rawLine of text.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+    const separatorIndex = line.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+    const key = line.slice(0, separatorIndex).trim();
+    if (!key || process.env[key] != null) {
+      continue;
+    }
+    let value = line.slice(separatorIndex + 1).trim();
+    if (
+      value.length >= 2
+      && ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
 }
 
 module.exports = { readConfig };

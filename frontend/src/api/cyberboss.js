@@ -10,6 +10,12 @@ export const cyberbossApi = {
   fetchConversations(limit = 7) {
     return client.get("/conversations", { params: { limit } });
   },
+  fetchConversationAttachmentBlob(filePath) {
+    return client.get("/conversations/attachment", {
+      params: { path: filePath },
+      responseType: "blob",
+    });
+  },
   fetchTimeline() {
     return client.get("/timeline");
   },

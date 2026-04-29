@@ -68,6 +68,7 @@
           <template v-for="item in day.items" :key="item.id">
             <article
               v-if="item.kind === 'message'"
+              :ref="(element) => setMessageRef(item.id, element)"
               class="chat-row"
               :class="`chat-row--${item.role}`"
             >
@@ -95,7 +96,27 @@
                   <span>{{ item.role === "user" ? "你" : "他" }}</span>
                   <span class="mono">{{ formatTime(item.timestamp) }}</span>
                 </div>
-                <div class="chat-bubble__text pre-wrap">{{ cleanEventText(item.text) }}</div>
+                <div v-if="messageBodyText(item)" class="chat-bubble__text pre-wrap">{{ messageBodyText(item) }}</div>
+                <div v-if="item.imageAttachments.length" class="chat-bubble__images">
+                  <button
+                    v-for="attachment in item.imageAttachments"
+                    :key="attachment.filePath || attachment.fileName || attachment.label"
+                    type="button"
+                    class="chat-image-card"
+                    :title="attachment.label || attachment.fileName || '图片附件'"
+                    @click="openImageAttachment(attachment)"
+                  >
+                    <img
+                      v-if="attachmentObjectUrl(attachment)"
+                      class="chat-image-card__image"
+                      :src="attachmentObjectUrl(attachment)"
+                      :alt="attachment.label || attachment.fileName || '图片附件'"
+                      loading="lazy"
+                    />
+                    <div v-else class="chat-image-card__placeholder">加载中</div>
+                    <div class="chat-image-card__label">{{ attachment.label || attachment.fileName || "图片" }}</div>
+                  </button>
+                </div>
               </div>
 
               <div
@@ -209,11 +230,88 @@
         </div>
       </div>
     </teleport>
+
+    <teleport to="body">
+      <div v-if="hourSheetOpen" class="date-sheet-overlay" @click.self="hourSheetOpen = false">
+        <div class="hour-sheet">
+          <div class="hour-sheet__header">
+            <div>
+              <div class="date-sheet__kicker">时间定位</div>
+              <h3>{{ selectedDateDisplay }}</h3>
+            </div>
+            <button type="button" class="modal-close" aria-label="关闭" @click="hourSheetOpen = false">×</button>
+          </div>
+
+          <div class="hour-sheet__body">
+            <button
+              v-for="anchor in hourAnchors"
+              :key="anchor.id"
+              type="button"
+              class="hour-chip"
+              @click="jumpToHour(anchor)"
+            >
+              <span class="hour-chip__hour mono">{{ anchor.hourLabel }}</span>
+              <span class="hour-chip__count">{{ anchor.count }} 条</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </teleport>
+
+    <div
+      v-if="showFloatingLauncher && !dateSheetOpen && !hourSheetOpen"
+      class="floating-actions"
+      :class="{ 'floating-actions--open': floatingActionsOpen }"
+    >
+      <div v-if="floatingActionsOpen" class="floating-actions__menu">
+        <button
+          v-if="hourAnchors.length"
+          type="button"
+          class="floating-action-button"
+          title="时间定位"
+          @click="handleFloatingAction(openHourSheet)"
+        >
+          时
+        </button>
+        <button
+          type="button"
+          class="floating-action-button"
+          title="同步"
+          @click="handleFloatingAction(load)"
+        >
+          ↻
+        </button>
+        <button
+          type="button"
+          class="floating-action-button"
+          title="回到顶部"
+          @click="handleFloatingAction(scrollToTop)"
+        >
+          ↑
+        </button>
+        <button
+          type="button"
+          class="floating-action-button"
+          title="前往底部"
+          @click="handleFloatingAction(scrollToBottom)"
+        >
+          ↓
+        </button>
+      </div>
+      <button
+        type="button"
+        class="floating-action-toggle"
+        :title="floatingActionsOpen ? '收起快捷操作' : '打开快捷操作'"
+        @click="floatingActionsOpen = !floatingActionsOpen"
+      >
+        {{ floatingActionsOpen ? "×" : "⋮" }}
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { cyberbossApi } from "../api/cyberboss";
 
 const loading = ref(false);
@@ -223,6 +321,11 @@ const state = ref({});
 const threadExpanded = ref(false);
 const dateSheetOpen = ref(false);
 const currentCalendarMonth = ref("");
+const showFloatingLauncher = ref(false);
+const floatingActionsOpen = ref(false);
+const attachmentObjectUrls = ref({});
+const hourSheetOpen = ref(false);
+const messageRefs = new Map();
 
 const calendarWeekdays = ["一", "二", "三", "四", "五", "六", "日"];
 
@@ -245,6 +348,34 @@ const activeCalendarMonth = computed(() => buildCalendarMonth(
   currentCalendarMonth.value || resolveCalendarMonth(selectedDate.value),
   availableDateSet.value,
 ));
+const visibleImageAttachments = computed(() => filteredTranscriptDays.value
+  .flatMap((day) => Array.isArray(day?.items) ? day.items : [])
+  .flatMap((item) => item?.kind === "message" && Array.isArray(item.imageAttachments) ? item.imageAttachments : [])
+  .filter((attachment) => attachment?.filePath));
+const hourAnchors = computed(() => {
+  const groups = new Map();
+
+  for (const day of filteredTranscriptDays.value) {
+    for (const item of Array.isArray(day?.items) ? day.items : []) {
+      if (item?.kind !== "message") {
+        continue;
+      }
+      const hourLabel = formatHourLabel(item.timestamp);
+      if (!hourLabel) {
+        continue;
+      }
+      const current = groups.get(hourLabel) || {
+        id: item.id,
+        hourLabel,
+        count: 0,
+      };
+      current.count += 1;
+      groups.set(hourLabel, current);
+    }
+  }
+
+  return Array.from(groups.values()).sort((left, right) => left.hourLabel.localeCompare(right.hourLabel));
+});
 
 const currentThread = computed(() => (
   resolveCurrentThreadFromDays(days.value) || resolveCurrentThreadFromSessions(state.value.sessions)
@@ -276,6 +407,38 @@ async function load() {
   }
 }
 
+function updateFloatingLauncher() {
+  if (loading.value || error.value || !filteredTranscriptDays.value.length) {
+    showFloatingLauncher.value = false;
+    floatingActionsOpen.value = false;
+    return;
+  }
+
+  const scrollableHeight = document.documentElement.scrollHeight - window.innerHeight;
+  showFloatingLauncher.value = scrollableHeight > 180;
+
+  if (!showFloatingLauncher.value) {
+    floatingActionsOpen.value = false;
+  }
+}
+
+function handleFloatingAction(action) {
+  floatingActionsOpen.value = false;
+  action();
+}
+
+function openHourSheet() {
+  hourSheetOpen.value = true;
+}
+
+function scrollToTop() {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function scrollToBottom() {
+  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+}
+
 function toggleThreadExpanded() {
   threadExpanded.value = !threadExpanded.value;
 }
@@ -286,6 +449,26 @@ function handleDatePick(date) {
   }
   selectedDate.value = date;
   dateSheetOpen.value = false;
+}
+
+function setMessageRef(id, element) {
+  const normalizedId = String(id || "").trim();
+  if (!normalizedId) {
+    return;
+  }
+  if (element) {
+    messageRefs.set(normalizedId, element);
+  } else {
+    messageRefs.delete(normalizedId);
+  }
+}
+
+function jumpToHour(anchor) {
+  const element = messageRefs.get(String(anchor?.id || "").trim());
+  if (element instanceof HTMLElement) {
+    hourSheetOpen.value = false;
+    element.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function switchCalendarMonth(direction) {
@@ -317,6 +500,8 @@ function buildTranscriptDay(day) {
         role: "user",
         text: event.text,
         timestamp: event.timestamp,
+        attachments: normalizeAttachmentsFromMeta(event.meta),
+        imageAttachments: extractImageAttachments(event.meta),
         before: [],
         after: [],
       });
@@ -331,6 +516,8 @@ function buildTranscriptDay(day) {
         role: "assistant",
         text: event.text,
         timestamp: event.timestamp,
+        attachments: normalizeAttachmentsFromMeta(event.meta),
+        imageAttachments: extractImageAttachments(event.meta),
         before: pendingBefore,
         after: [],
       };
@@ -402,6 +589,88 @@ function cleanEventText(input) {
     .trim();
 }
 
+function normalizeAttachmentsFromMeta(meta) {
+  const attachments = Array.isArray(meta?.attachments) ? meta.attachments : [];
+  return attachments
+    .map((attachment) => {
+      if (!attachment || typeof attachment !== "object") {
+        return null;
+      }
+      return {
+        kind: String(attachment.kind || "").trim(),
+        label: String(attachment.label || "").trim(),
+        fileName: String(attachment.fileName || "").trim(),
+        filePath: String(attachment.filePath || "").trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
+function extractImageAttachments(meta) {
+  return normalizeAttachmentsFromMeta(meta).filter((attachment) => attachment.kind === "image" && attachment.filePath);
+}
+
+function messageBodyText(item) {
+  const text = cleanEventText(item?.text || "");
+  if (!Array.isArray(item?.imageAttachments) || !item.imageAttachments.length) {
+    return text;
+  }
+  return text
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("[图片]"))
+    .join("\n")
+    .trim();
+}
+
+function attachmentObjectUrl(attachment) {
+  const filePath = String(attachment?.filePath || "").trim();
+  return filePath ? attachmentObjectUrls.value[filePath] || "" : "";
+}
+
+function openImageAttachment(attachment) {
+  const url = attachmentObjectUrl(attachment);
+  if (url && typeof window !== "undefined") {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
+async function ensureVisibleAttachmentUrls() {
+  const nextUrls = { ...attachmentObjectUrls.value };
+  const pending = [];
+
+  for (const attachment of visibleImageAttachments.value) {
+    const filePath = String(attachment?.filePath || "").trim();
+    if (!filePath || Object.prototype.hasOwnProperty.call(nextUrls, filePath)) {
+      continue;
+    }
+    pending.push(
+      cyberbossApi.fetchConversationAttachmentBlob(filePath)
+        .then((blob) => {
+          nextUrls[filePath] = URL.createObjectURL(blob);
+        })
+        .catch(() => {
+          nextUrls[filePath] = "";
+        }),
+    );
+  }
+
+  if (!pending.length) {
+    return;
+  }
+
+  await Promise.all(pending);
+  attachmentObjectUrls.value = nextUrls;
+}
+
+function revokeAttachmentUrls() {
+  for (const value of Object.values(attachmentObjectUrls.value)) {
+    if (value) {
+      URL.revokeObjectURL(value);
+    }
+  }
+  attachmentObjectUrls.value = {};
+}
+
 function formatTime(value) {
   const parsed = Date.parse(value || "");
   if (!Number.isFinite(parsed)) {
@@ -411,6 +680,18 @@ function formatTime(value) {
     timeZone: "Asia/Shanghai",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
+  }).format(new Date(parsed));
+}
+
+function formatHourLabel(value) {
+  const parsed = Date.parse(value || "");
+  if (!Number.isFinite(parsed)) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
     hour12: false,
   }).format(new Date(parsed));
 }
@@ -664,10 +945,44 @@ watch(transcriptDays, (nextDays) => {
 watch(dateSheetOpen, (open) => {
   if (open) {
     currentCalendarMonth.value = resolveCalendarMonth(selectedDate.value);
+    floatingActionsOpen.value = false;
   }
 });
 
-onMounted(load);
+watch(hourSheetOpen, (open) => {
+  if (open) {
+    floatingActionsOpen.value = false;
+  }
+});
+
+watch(
+  visibleImageAttachments,
+  async () => {
+    await ensureVisibleAttachmentUrls();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => [loading.value, error.value, filteredTranscriptDays.value.length, selectedDate.value],
+  async () => {
+    await nextTick();
+    updateFloatingLauncher();
+  },
+  { immediate: true },
+);
+
+onMounted(() => {
+  load();
+  window.addEventListener("scroll", updateFloatingLauncher, { passive: true });
+  window.addEventListener("resize", updateFloatingLauncher);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("scroll", updateFloatingLauncher);
+  window.removeEventListener("resize", updateFloatingLauncher);
+  revokeAttachmentUrls();
+});
 </script>
 
 <style scoped>
@@ -894,6 +1209,61 @@ onMounted(load);
   line-height: 1;
 }
 
+.hour-sheet {
+  width: min(100%, 360px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 12px 14px;
+  background: linear-gradient(180deg, #fbf7ef 0%, #f4efe6 100%);
+  border-radius: 24px;
+  box-shadow: 0 20px 48px rgba(24, 35, 15, 0.18);
+}
+
+.hour-sheet__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.hour-sheet__header h3 {
+  margin: 4px 0 0;
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.hour-sheet__body {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.hour-chip {
+  appearance: none;
+  border: 1px solid rgba(24, 35, 15, 0.08);
+  border-radius: 16px;
+  padding: 12px 8px;
+  background: rgba(255, 253, 249, 0.92);
+  color: var(--ink);
+  text-align: center;
+  display: grid;
+  gap: 4px;
+  box-shadow: 0 6px 14px rgba(24, 35, 15, 0.05);
+}
+
+.hour-chip__hour {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.hour-chip__count {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 .date-calendar__title {
   color: var(--ink);
   font-size: 14px;
@@ -959,6 +1329,59 @@ onMounted(load);
   font-size: 14px;
   font-weight: 600;
   line-height: 1;
+}
+
+.floating-actions {
+  position: fixed;
+  right: 16px;
+  bottom: 88px;
+  z-index: 2100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.floating-actions__menu {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.floating-action-toggle,
+.floating-action-button {
+  appearance: none;
+  border: 1px solid rgba(24, 35, 15, 0.12);
+  border-radius: 999px;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  background: rgba(255, 253, 249, 0.96);
+  color: var(--ink);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 22px rgba(24, 35, 15, 0.12);
+  backdrop-filter: blur(10px);
+}
+
+.floating-action-toggle {
+  width: 48px;
+  height: 48px;
+  font-size: 22px;
+  color: var(--accent);
+  background: rgba(238, 244, 229, 0.98);
+  border-color: rgba(49, 81, 30, 0.16);
+  line-height: 1;
+  padding-top: 1px;
+}
+
+.floating-actions--open .floating-action-toggle {
+  background: rgba(255, 253, 249, 0.98);
 }
 
 .day-list {
@@ -1036,6 +1459,50 @@ onMounted(load);
   margin: 0;
   font-size: 14px;
   line-height: 1.6;
+}
+
+.chat-bubble__images {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chat-image-card {
+  appearance: none;
+  border: 1px solid rgba(24, 35, 15, 0.08);
+  border-radius: 16px;
+  padding: 8px;
+  background: rgba(255, 253, 249, 0.86);
+  text-align: left;
+}
+
+.chat-image-card__image,
+.chat-image-card__placeholder {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+}
+
+.chat-image-card__image {
+  max-height: 280px;
+  object-fit: cover;
+  background: rgba(24, 35, 15, 0.04);
+}
+
+.chat-image-card__placeholder {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: rgba(24, 35, 15, 0.04);
+}
+
+.chat-image-card__label {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .sidecar-stack {
