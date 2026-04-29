@@ -1,6 +1,7 @@
 # Dashboard
 
 给 `Cyberboss` 用的本地查看面板。
+`Cyberboss`的项目地址：`https://github.com/WenXiaoWendy/cyberboss`
 
 它主要解决两件事：
 
