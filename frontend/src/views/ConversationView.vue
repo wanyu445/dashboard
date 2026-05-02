@@ -26,6 +26,15 @@
           >
             微
           </router-link>
+          <button
+            type="button"
+            class="meta-trigger reminder-trigger"
+            :class="{ 'meta-trigger--active': reminderSheetOpen }"
+            title="提醒列表"
+            @click="reminderSheetOpen = true"
+          >
+            <span class="reminder-trigger__icon" aria-hidden="true"></span>
+          </button>
         </div>
       </div>
       <p class="page-subtitle">聊天正文单独看，Thinking 和工具调用缩成挂在回复附近的小折叠。</p>
@@ -49,19 +58,40 @@
           <span class="date-select-trigger__label">{{ selectedDateDisplay }}</span>
           <span class="date-select-trigger__icon">⌄</span>
         </button>
-        <van-tag plain type="success">最近 {{ transcriptDays.length }} 天</van-tag>
+        <button
+          v-if="filteredTranscriptDays.length"
+          type="button"
+          class="search-trigger"
+          title="搜索当前日期"
+          @click="openSearchSheet"
+        >
+          ⌕
+        </button>
+        <van-tag plain type="success">最近 {{ availableConversationDates.length }} 天</van-tag>
       </div>
     </section>
 
     <van-empty v-if="!loading && !transcriptDays.length" description="暂时没读到会话日志" />
     <van-loading v-else-if="loading" size="24px" vertical>加载中</van-loading>
     <van-notice-bar v-else-if="error" color="#8b1538" background="#fdecef" :text="error" />
+    <van-loading v-else-if="dayLoading" size="20px" vertical>正在切换日期</van-loading>
 
     <div v-else class="day-list">
       <section v-for="day in filteredTranscriptDays" :key="day.date" class="day-block">
         <div class="day-divider">
           <span class="day-divider__date">{{ formatDayLabel(day.date) }}</span>
-          <span class="day-divider__meta">{{ day.threadIds.length }} 个线程 · {{ day.items.length }} 条消息</span>
+          <div class="day-divider__meta-wrap">
+            <span class="day-divider__meta">{{ dayMetaText(day) }}</span>
+            <button
+              v-if="metaToggleVisible"
+              type="button"
+              class="meta-switch"
+              title="切换显示"
+              @click="toggleMetaMode"
+            >
+              ↺
+            </button>
+          </div>
         </div>
 
         <div class="transcript">
@@ -70,7 +100,10 @@
               v-if="item.kind === 'message'"
               :ref="(element) => setMessageRef(item.id, element)"
               class="chat-row"
-              :class="`chat-row--${item.role}`"
+              :class="[
+                `chat-row--${item.role}`,
+                { 'chat-row--search-hit': activeSearchTargetId === item.id },
+              ]"
             >
               <div
                 v-if="item.role === 'assistant' && item.before.length"
@@ -119,6 +152,37 @@
                 </div>
               </div>
 
+              <div v-if="item.role === 'assistant' && item.stickers.length" class="sticker-message-row">
+                <button
+                  v-for="sticker in item.stickers"
+                  :key="`${item.id}-${sticker.id}`"
+                  type="button"
+                  class="sticker-message"
+                  :title="sticker.label || sticker.id"
+                  @click="openSticker(sticker)"
+                >
+                  <img
+                    v-if="stickerObjectUrl(sticker)"
+                    class="sticker-message__image"
+                    :src="stickerObjectUrl(sticker)"
+                    :alt="sticker.label || sticker.id"
+                    loading="lazy"
+                  />
+                  <span v-else class="sticker-message__placeholder">{{ sticker.id }}</span>
+                </button>
+              </div>
+
+              <div v-if="item.role === 'assistant' && item.actionTags.length" class="action-tag-row">
+                <span
+                  v-for="tag in item.actionTags"
+                  :key="tag.key"
+                  class="action-tag"
+                >
+                  <span class="action-tag__marker">#</span>
+                  <span class="action-tag__label">{{ tag.label }}</span>
+                </span>
+              </div>
+
               <div
                 v-if="item.role === 'assistant' && item.after.length"
                 class="sidecar-stack sidecar-stack--after"
@@ -163,6 +227,64 @@
         </div>
       </section>
     </div>
+
+    <teleport to="body">
+      <div v-if="reminderSheetOpen" class="date-sheet-overlay" @click.self="reminderSheetOpen = false">
+        <div class="reminder-sheet">
+          <div class="reminder-sheet__header">
+            <div>
+              <div class="date-sheet__kicker">提醒列表</div>
+              <h3>{{ reminderListTitle }}</h3>
+            </div>
+            <button type="button" class="modal-close" aria-label="关闭" @click="reminderSheetOpen = false">×</button>
+          </div>
+
+          <div class="reminder-sheet__body">
+            <section class="reminder-group">
+              <div class="reminder-group__title">
+                <span>和我相关</span>
+                <span>{{ personalReminderItems.length }} 条</span>
+              </div>
+              <div v-if="personalReminderItems.length" class="reminder-list">
+                <article
+                  v-for="item in personalReminderItems"
+                  :key="item.id"
+                  class="reminder-card"
+                >
+                  <div class="reminder-card__time mono">{{ item.timeLabel }}</div>
+                  <div class="reminder-card__main">
+                    <div class="reminder-card__label">{{ item.label }}</div>
+                    <div v-if="item.detail" class="reminder-card__detail">{{ item.detail }}</div>
+                  </div>
+                </article>
+              </div>
+              <div v-else class="reminder-empty">没有待触发的个人提醒</div>
+            </section>
+
+            <section class="reminder-group">
+              <div class="reminder-group__title">
+                <span>系统维护</span>
+                <span>{{ internalReminderItems.length }} 条</span>
+              </div>
+              <div v-if="internalReminderItems.length" class="reminder-list">
+                <article
+                  v-for="item in internalReminderItems"
+                  :key="item.id"
+                  class="reminder-card reminder-card--internal"
+                >
+                  <div class="reminder-card__time mono">{{ item.timeLabel }}</div>
+                  <div class="reminder-card__main">
+                    <div class="reminder-card__label">{{ item.label }}</div>
+                    <div v-if="item.detail" class="reminder-card__detail">{{ item.detail }}</div>
+                  </div>
+                </article>
+              </div>
+              <div v-else class="reminder-empty">没有待触发的系统维护</div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </teleport>
 
     <teleport to="body">
       <div v-if="dateSheetOpen" class="date-sheet-overlay" @click.self="dateSheetOpen = false">
@@ -258,12 +380,73 @@
       </div>
     </teleport>
 
+    <teleport to="body">
+      <div v-if="searchSheetOpen" class="date-sheet-overlay" @click.self="closeSearchSheet">
+        <div class="search-sheet">
+          <div class="search-sheet__header">
+            <div>
+              <div class="date-sheet__kicker">当前日期搜索</div>
+              <h3>{{ selectedDateDisplay }}</h3>
+            </div>
+            <button type="button" class="modal-close" aria-label="关闭" @click="closeSearchSheet">×</button>
+          </div>
+
+          <div class="search-sheet__controls">
+            <input
+              ref="searchInputRef"
+              v-model="searchQuery"
+              class="search-input"
+              type="search"
+              placeholder="搜索一句话或关键词"
+              autocomplete="off"
+            />
+            <div class="search-sheet__nav">
+              <span class="search-sheet__status">{{ searchStatusText }}</span>
+            </div>
+          </div>
+
+          <div v-if="searchResults.length" class="search-result-list">
+            <button
+              v-for="(result, index) in searchResults"
+              :key="result.id"
+              type="button"
+              class="search-result-card"
+              :class="{ 'search-result-card--active': index === activeSearchIndex }"
+              @click="jumpToSearchResult(index)"
+            >
+              <span class="search-result-card__meta">
+                {{ searchResultRoleLabel(result.role) }} · {{ formatTime(result.timestamp) }}
+              </span>
+              <span class="search-result-card__text">
+                <template v-for="(part, partIndex) in result.snippetParts" :key="`${result.id}:${partIndex}`">
+                  <mark v-if="part.hit" class="search-highlight">{{ part.text }}</mark>
+                  <span v-else>{{ part.text }}</span>
+                </template>
+              </span>
+            </button>
+          </div>
+          <div v-else class="search-empty">
+            {{ normalizedSearchQuery ? "没有找到匹配消息" : "输入关键词后，只搜索当前日期的对话正文" }}
+          </div>
+        </div>
+      </div>
+    </teleport>
+
     <div
-      v-if="showFloatingLauncher && !dateSheetOpen && !hourSheetOpen"
+      v-if="showFloatingLauncher && !dateSheetOpen && !hourSheetOpen && !searchSheetOpen && !reminderSheetOpen"
       class="floating-actions"
       :class="{ 'floating-actions--open': floatingActionsOpen }"
     >
       <div v-if="floatingActionsOpen" class="floating-actions__menu">
+        <button
+          v-if="filteredTranscriptDays.length"
+          type="button"
+          class="floating-action-button"
+          title="搜索当前日期"
+          @click="handleFloatingAction(openSearchSheet)"
+        >
+          ⌕
+        </button>
         <button
           v-if="hourAnchors.length"
           type="button"
@@ -307,6 +490,45 @@
         {{ floatingActionsOpen ? "×" : "⋮" }}
       </button>
     </div>
+
+    <div
+      v-if="searchDockVisible && !searchSheetOpen && !dateSheetOpen && !hourSheetOpen && !reminderSheetOpen"
+      class="search-dock"
+    >
+      <button
+        type="button"
+        class="search-dock__main"
+        title="打开搜索结果"
+        @click="openSearchSheet"
+      >
+        <span class="search-dock__label">搜索</span>
+        <span class="search-dock__count">{{ searchDockCountText }}</span>
+      </button>
+      <button
+        type="button"
+        class="search-dock__button"
+        title="上一条"
+        @click="jumpSearchByOffset(-1)"
+      >
+        ↑
+      </button>
+      <button
+        type="button"
+        class="search-dock__button"
+        title="下一条"
+        @click="jumpSearchByOffset(1)"
+      >
+        ↓
+      </button>
+      <button
+        type="button"
+        class="search-dock__button search-dock__button--close"
+        title="关闭搜索导航"
+        @click="clearSearchSession"
+      >
+        ×
+      </button>
+    </div>
   </div>
 </template>
 
@@ -315,26 +537,36 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { cyberbossApi } from "../api/cyberboss";
 
 const loading = ref(false);
+const dayLoading = ref(false);
 const error = ref("");
-const days = ref([]);
+const daySummaries = ref([]);
+const activeDay = ref(null);
 const state = ref({});
 const threadExpanded = ref(false);
 const dateSheetOpen = ref(false);
+const reminderSheetOpen = ref(false);
 const currentCalendarMonth = ref("");
 const showFloatingLauncher = ref(false);
 const floatingActionsOpen = ref(false);
 const attachmentObjectUrls = ref({});
+const stickerObjectUrls = ref({});
 const hourSheetOpen = ref(false);
+const searchSheetOpen = ref(false);
+const searchQuery = ref("");
+const activeSearchIndex = ref(-1);
+const activeSearchTargetId = ref("");
+const searchDockPinned = ref(false);
+const searchInputRef = ref(null);
 const messageRefs = new Map();
 
 const calendarWeekdays = ["一", "二", "三", "四", "五", "六", "日"];
 
 const transcriptDays = computed(() => (
-  Array.isArray(days.value)
-    ? days.value.map(buildTranscriptDay).filter((day) => day.items.length)
-    : []
+  activeDay.value ? [buildTranscriptDay(activeDay.value)].filter((day) => day.items.length) : []
 ));
-const availableConversationDates = computed(() => transcriptDays.value.map((day) => day.date).filter(Boolean));
+const availableConversationDates = computed(() => (
+  Array.isArray(daySummaries.value) ? daySummaries.value.map((day) => day.date).filter(Boolean) : []
+));
 const availableDateSet = computed(() => new Set(availableConversationDates.value));
 const selectedDate = ref("");
 const filteredTranscriptDays = computed(() => {
@@ -352,6 +584,10 @@ const visibleImageAttachments = computed(() => filteredTranscriptDays.value
   .flatMap((day) => Array.isArray(day?.items) ? day.items : [])
   .flatMap((item) => item?.kind === "message" && Array.isArray(item.imageAttachments) ? item.imageAttachments : [])
   .filter((attachment) => attachment?.filePath));
+const visibleStickers = computed(() => filteredTranscriptDays.value
+  .flatMap((day) => Array.isArray(day?.items) ? day.items : [])
+  .flatMap((item) => item?.kind === "message" && Array.isArray(item.stickers) ? item.stickers : [])
+  .filter((sticker) => sticker?.id));
 const hourAnchors = computed(() => {
   const groups = new Map();
 
@@ -376,9 +612,51 @@ const hourAnchors = computed(() => {
 
   return Array.from(groups.values()).sort((left, right) => left.hourLabel.localeCompare(right.hourLabel));
 });
+const normalizedSearchQuery = computed(() => searchQuery.value.trim().toLowerCase());
+const searchableMessages = computed(() => filteredTranscriptDays.value
+  .flatMap((day) => Array.isArray(day?.items) ? day.items : [])
+  .filter((item) => item?.kind === "message")
+  .map((item) => ({
+    id: item.id,
+    role: item.role,
+    timestamp: item.timestamp,
+    text: messageBodyText(item),
+  }))
+  .filter((item) => item.text));
+const searchResults = computed(() => {
+  const query = normalizedSearchQuery.value;
+  if (!query) {
+    return [];
+  }
+  return searchableMessages.value
+    .filter((item) => item.text.toLowerCase().includes(query))
+    .map((item) => ({
+      ...item,
+      snippet: buildSearchSnippet(item.text, query),
+      snippetParts: buildSearchSnippetParts(item.text, query),
+    }));
+});
+const searchStatusText = computed(() => {
+  if (!normalizedSearchQuery.value) {
+    return `${searchableMessages.value.length} 条可搜索消息`;
+  }
+  if (!searchResults.value.length) {
+    return "0 条结果";
+  }
+  const current = activeSearchIndex.value >= 0 ? activeSearchIndex.value + 1 : 1;
+  return `${current}/${searchResults.value.length}`;
+});
+const searchDockVisible = computed(() => searchDockPinned.value && searchResults.value.length > 0);
+const searchDockCountText = computed(() => {
+  if (!searchResults.value.length) {
+    return "0/0";
+  }
+  const current = activeSearchIndex.value >= 0 ? activeSearchIndex.value + 1 : 1;
+  return `${current}/${searchResults.value.length}`;
+});
 
 const currentThread = computed(() => (
-  resolveCurrentThreadFromDays(days.value) || resolveCurrentThreadFromSessions(state.value.sessions)
+  resolveCurrentThreadFromDays(activeDay.value ? [activeDay.value] : []) || resolveCurrentThreadFromSessions(state.value.sessions)
 ));
 const currentThreadLabel = computed(() => {
   if (!currentThread.value.fullId) {
@@ -389,22 +667,52 @@ const currentThreadLabel = computed(() => {
   }
   return `线程：${currentThread.value.shortId}`;
 });
+const metaMode = ref("auto");
+const reminderSummaryText = computed(() => formatReminderSummary(state.value.reminderSummary, "active"));
+const reminderSummaryAnyText = computed(() => formatReminderSummary(state.value.reminderSummary, "any"));
+const hasPersonalReminder = computed(() => (Number(state.value?.reminderSummary?.personal?.total) || 0) > 0);
+const reminderItems = computed(() => buildReminderItems(state.value?.reminders));
+const personalReminderItems = computed(() => reminderItems.value.filter((item) => item.group === "personal"));
+const internalReminderItems = computed(() => reminderItems.value.filter((item) => item.group === "internal"));
+const reminderListTitle = computed(() => `${reminderItems.value.length} 条待触发`);
+const metaToggleVisible = computed(() => Boolean(reminderSummaryAnyText.value));
+const resolvedMetaMode = computed(() => {
+  if (metaMode.value === "auto") {
+    return hasPersonalReminder.value ? "reminder" : "thread";
+  }
+  return metaMode.value;
+});
 
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [conversationResult, stateResult] = await Promise.all([
-      cyberbossApi.fetchConversations(10),
+    const [conversationSummaryResult, stateResult] = await Promise.all([
+      cyberbossApi.fetchConversationDays(45),
       cyberbossApi.fetchState(),
     ]);
-    days.value = Array.isArray(conversationResult.days) ? conversationResult.days : [];
+    daySummaries.value = Array.isArray(conversationSummaryResult.days) ? conversationSummaryResult.days : [];
     state.value = stateResult || {};
+    metaMode.value = "auto";
+    const nextDate = resolveDefaultConversationDate(daySummaries.value);
+    selectedDate.value = nextDate;
+    await loadConversationDay(nextDate);
   } catch (err) {
     error.value = err.message;
+    activeDay.value = null;
   } finally {
     loading.value = false;
   }
+}
+
+async function loadConversationDay(date) {
+  const normalizedDate = String(date || "").trim();
+  if (!normalizedDate) {
+    activeDay.value = null;
+    return;
+  }
+  const result = await cyberbossApi.fetchConversationDay(normalizedDate);
+  activeDay.value = result?.day || null;
 }
 
 function updateFloatingLauncher() {
@@ -431,6 +739,26 @@ function openHourSheet() {
   hourSheetOpen.value = true;
 }
 
+async function openSearchSheet() {
+  searchSheetOpen.value = true;
+  floatingActionsOpen.value = false;
+  await nextTick();
+  if (searchInputRef.value instanceof HTMLInputElement) {
+    searchInputRef.value.focus();
+  }
+}
+
+function closeSearchSheet() {
+  searchSheetOpen.value = false;
+}
+
+function clearSearchSession() {
+  searchQuery.value = "";
+  activeSearchIndex.value = -1;
+  activeSearchTargetId.value = "";
+  searchDockPinned.value = false;
+}
+
 function scrollToTop() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -443,12 +771,34 @@ function toggleThreadExpanded() {
   threadExpanded.value = !threadExpanded.value;
 }
 
+function toggleMetaMode() {
+  metaMode.value = resolvedMetaMode.value === "thread" ? "reminder" : "thread";
+}
+
 function handleDatePick(date) {
   if (!availableDateSet.value.has(date)) {
     return;
   }
-  selectedDate.value = date;
-  dateSheetOpen.value = false;
+  changeSelectedDate(date);
+}
+
+async function changeSelectedDate(date) {
+  const normalizedDate = String(date || "").trim();
+  if (!normalizedDate || normalizedDate === selectedDate.value) {
+    dateSheetOpen.value = false;
+    return;
+  }
+  dayLoading.value = true;
+  error.value = "";
+  try {
+    selectedDate.value = normalizedDate;
+    await loadConversationDay(normalizedDate);
+    dateSheetOpen.value = false;
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+    dayLoading.value = false;
+  }
 }
 
 function setMessageRef(id, element) {
@@ -468,6 +818,36 @@ function jumpToHour(anchor) {
   if (element instanceof HTMLElement) {
     hourSheetOpen.value = false;
     element.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function jumpSearchByOffset(offset) {
+  if (!searchResults.value.length) {
+    return;
+  }
+  const current = activeSearchIndex.value >= 0 ? activeSearchIndex.value : (offset > 0 ? -1 : 0);
+  const next = (current + offset + searchResults.value.length) % searchResults.value.length;
+  jumpToSearchResult(next);
+}
+
+async function jumpToSearchResult(index) {
+  const result = searchResults.value[index];
+  if (!result) {
+    return;
+  }
+  activeSearchIndex.value = index;
+  searchSheetOpen.value = false;
+  searchDockPinned.value = true;
+  await nextTick();
+  const element = messageRefs.get(String(result.id || "").trim());
+  if (element instanceof HTMLElement) {
+    activeSearchTargetId.value = result.id;
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => {
+      if (activeSearchTargetId.value === result.id) {
+        activeSearchTargetId.value = "";
+      }
+    }, 1400);
   }
 }
 
@@ -502,6 +882,8 @@ function buildTranscriptDay(day) {
         timestamp: event.timestamp,
         attachments: normalizeAttachmentsFromMeta(event.meta),
         imageAttachments: extractImageAttachments(event.meta),
+        stickers: [],
+        actionTags: [],
         before: [],
         after: [],
       });
@@ -518,6 +900,8 @@ function buildTranscriptDay(day) {
         timestamp: event.timestamp,
         attachments: normalizeAttachmentsFromMeta(event.meta),
         imageAttachments: extractImageAttachments(event.meta),
+        stickers: normalizeStickers(event.stickers),
+        actionTags: Array.isArray(event.actionTags) ? event.actionTags : [],
         before: pendingBefore,
         after: [],
       };
@@ -610,6 +994,21 @@ function extractImageAttachments(meta) {
   return normalizeAttachmentsFromMeta(meta).filter((attachment) => attachment.kind === "image" && attachment.filePath);
 }
 
+function normalizeStickers(stickers) {
+  return (Array.isArray(stickers) ? stickers : [])
+    .map((sticker) => {
+      const id = String(sticker?.id || "").trim();
+      if (!id) {
+        return null;
+      }
+      return {
+        id,
+        label: String(sticker?.label || id).trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
 function messageBodyText(item) {
   const text = cleanEventText(item?.text || "");
   if (!Array.isArray(item?.imageAttachments) || !item.imageAttachments.length) {
@@ -622,6 +1021,49 @@ function messageBodyText(item) {
     .trim();
 }
 
+function buildSearchSnippet(text, query) {
+  const raw = String(text || "").replace(/\s+/gu, " ").trim();
+  const normalizedRaw = raw.toLowerCase();
+  const index = normalizedRaw.indexOf(query);
+  if (index < 0) {
+    return raw.length > 48 ? `${raw.slice(0, 48)}…` : raw;
+  }
+  const start = Math.max(0, index - 18);
+  const end = Math.min(raw.length, index + query.length + 30);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < raw.length ? "…" : "";
+  return `${prefix}${raw.slice(start, end)}${suffix}`;
+}
+
+function buildSearchSnippetParts(text, query) {
+  const snippet = buildSearchSnippet(text, query);
+  const normalizedQuery = String(query || "").trim();
+  if (!normalizedQuery) {
+    return [{ text: snippet, hit: false }];
+  }
+  const output = [];
+  const lowerSnippet = snippet.toLowerCase();
+  const lowerQuery = normalizedQuery.toLowerCase();
+  let cursor = 0;
+  while (cursor < snippet.length) {
+    const index = lowerSnippet.indexOf(lowerQuery, cursor);
+    if (index < 0) {
+      output.push({ text: snippet.slice(cursor), hit: false });
+      break;
+    }
+    if (index > cursor) {
+      output.push({ text: snippet.slice(cursor, index), hit: false });
+    }
+    output.push({ text: snippet.slice(index, index + normalizedQuery.length), hit: true });
+    cursor = index + normalizedQuery.length;
+  }
+  return output.length ? output : [{ text: snippet, hit: false }];
+}
+
+function searchResultRoleLabel(role) {
+  return role === "user" ? "你" : "他";
+}
+
 function attachmentObjectUrl(attachment) {
   const filePath = String(attachment?.filePath || "").trim();
   return filePath ? attachmentObjectUrls.value[filePath] || "" : "";
@@ -629,6 +1071,18 @@ function attachmentObjectUrl(attachment) {
 
 function openImageAttachment(attachment) {
   const url = attachmentObjectUrl(attachment);
+  if (url && typeof window !== "undefined") {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
+function stickerObjectUrl(sticker) {
+  const id = String(sticker?.id || "").trim();
+  return id ? stickerObjectUrls.value[id] || "" : "";
+}
+
+function openSticker(sticker) {
+  const url = stickerObjectUrl(sticker);
   if (url && typeof window !== "undefined") {
     window.open(url, "_blank", "noopener,noreferrer");
   }
@@ -662,6 +1116,34 @@ async function ensureVisibleAttachmentUrls() {
   attachmentObjectUrls.value = nextUrls;
 }
 
+async function ensureVisibleStickerUrls() {
+  const nextUrls = { ...stickerObjectUrls.value };
+  const pending = [];
+
+  for (const sticker of visibleStickers.value) {
+    const id = String(sticker?.id || "").trim();
+    if (!id || Object.prototype.hasOwnProperty.call(nextUrls, id)) {
+      continue;
+    }
+    pending.push(
+      cyberbossApi.fetchStickerBlob(id)
+        .then((blob) => {
+          nextUrls[id] = URL.createObjectURL(blob);
+        })
+        .catch(() => {
+          nextUrls[id] = "";
+        }),
+    );
+  }
+
+  if (!pending.length) {
+    return;
+  }
+
+  await Promise.all(pending);
+  stickerObjectUrls.value = nextUrls;
+}
+
 function revokeAttachmentUrls() {
   for (const value of Object.values(attachmentObjectUrls.value)) {
     if (value) {
@@ -669,6 +1151,15 @@ function revokeAttachmentUrls() {
     }
   }
   attachmentObjectUrls.value = {};
+}
+
+function revokeStickerUrls() {
+  for (const value of Object.values(stickerObjectUrls.value)) {
+    if (value) {
+      URL.revokeObjectURL(value);
+    }
+  }
+  stickerObjectUrls.value = {};
 }
 
 function formatTime(value) {
@@ -720,6 +1211,176 @@ function formatConversationDateDisplay(date) {
     return "选择日期";
   }
   return `${normalized} · ${formatWeekdayLabel(normalized)}`;
+}
+
+function dayMetaText(day) {
+  if (resolvedMetaMode.value === "reminder") {
+    return reminderSummaryAnyText.value || buildThreadMetaText(day);
+  }
+  return buildThreadMetaText(day);
+}
+
+function buildThreadMetaText(day) {
+  const threadCount = Array.isArray(day?.threadIds) ? day.threadIds.length : 0;
+  const itemCount = Array.isArray(day?.items) ? day.items.length : 0;
+  return `${threadCount} 个线程 · ${itemCount} 条消息`;
+}
+
+function formatReminderSummary(summary, mode = "active") {
+  if (!summary || typeof summary !== "object") {
+    return "";
+  }
+  const bucket = mode === "active"
+    ? ((Number(summary?.personal?.total) || 0) > 0 ? summary.personal : null)
+    : ((Number(summary?.personal?.total) || 0) > 0 ? summary.personal : summary.internal);
+  if (!bucket) {
+    return "";
+  }
+  const total = Number(bucket.total) || 0;
+  if (!total) {
+    return "";
+  }
+  const dueAtMs = Number(bucket?.next?.dueAtMs);
+  const timeText = Number.isFinite(dueAtMs)
+    ? new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date(dueAtMs))
+    : "--:--";
+  const label = String(bucket?.next?.text || "").trim() || "提醒";
+  return `${total}条提醒 · ${timeText} ${label}`;
+}
+
+function buildReminderItems(remindersState) {
+  const now = Date.now();
+  const reminders = Array.isArray(remindersState?.reminders) ? remindersState.reminders : [];
+  return reminders
+    .map(normalizeReminderItem)
+    .filter((item) => item && item.dueAtMs >= now)
+    .sort((left, right) => left.dueAtMs - right.dueAtMs);
+}
+
+function normalizeReminderItem(reminder) {
+  const dueAtMs = Number(reminder?.dueAtMs);
+  if (!Number.isFinite(dueAtMs)) {
+    return null;
+  }
+  const text = String(reminder?.text || "").trim();
+  const resolved = resolveReminderDisplay(text);
+  return {
+    id: String(reminder?.id || `${dueAtMs}:${text}`).trim(),
+    dueAtMs,
+    text,
+    group: resolved.group,
+    label: resolved.label,
+    detail: resolved.detail,
+    timeLabel: formatReminderTime(dueAtMs),
+  };
+}
+
+function resolveReminderDisplay(text) {
+  if (text.startsWith("__cyberboss_daily_diary__|")) {
+    const [date, time] = text.replace("__cyberboss_daily_diary__|", "").split("|");
+    return {
+      group: "internal",
+      label: "日记",
+      detail: joinReminderDetail([date, time]),
+    };
+  }
+
+  if (text.startsWith("__cyberboss_memory_review__|")) {
+    const [date, time] = text.replace("__cyberboss_memory_review__|", "").split("|");
+    return {
+      group: "internal",
+      label: "记忆回顾",
+      detail: joinReminderDetail([date, time]),
+    };
+  }
+
+  if (text.startsWith("__cyberboss_timeline_confirm__|")) {
+    const [date, time] = text.replace("__cyberboss_timeline_confirm__|", "").split("|");
+    return {
+      group: "internal",
+      label: "时间轴确认",
+      detail: joinReminderDetail([date, time]),
+    };
+  }
+
+  if (text.startsWith("__cyberboss_sleep__")) {
+    const parsed = parseInternalReminderPayload(text, "__cyberboss_sleep__");
+    const stageLabelMap = {
+      sleep_probe: "睡眠确认",
+      assume_asleep: "默认入睡",
+      wake_check: "起床确认",
+      oversleep_check: "睡眠过长确认",
+    };
+    return {
+      group: "personal",
+      label: stageLabelMap[parsed?.stage] || "睡眠提醒",
+      detail: parsed?.stage ? `sleep · ${parsed.stage}` : "sleep",
+    };
+  }
+
+  if (text.startsWith("__cyberboss_presence__")) {
+    const parsed = parseInternalReminderPayload(text, "__cyberboss_presence__");
+    const stageLabelMap = {
+      gentle_checkin: "状态确认",
+      lost_contact: "失联确认",
+    };
+    return {
+      group: "personal",
+      label: stageLabelMap[parsed?.stage] || "状态提醒",
+      detail: parsed?.stage ? `presence · ${parsed.stage}` : "presence",
+    };
+  }
+
+  if (text.startsWith("__cyberboss_")) {
+    return {
+      group: "internal",
+      label: "系统提醒",
+      detail: text.slice(0, 48),
+    };
+  }
+
+  return {
+    group: "personal",
+    label: text || "提醒",
+    detail: "",
+  };
+}
+
+function parseInternalReminderPayload(text, prefix) {
+  const payloadText = String(text || "").slice(prefix.length).trim();
+  if (!payloadText) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(payloadText);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function joinReminderDetail(parts) {
+  return parts.map((part) => String(part || "").trim()).filter(Boolean).join(" · ");
+}
+
+function formatReminderTime(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return "--:--";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(parsed));
 }
 
 function formatWeekdayLabel(date) {
@@ -931,7 +1592,7 @@ function resolveDefaultConversationDate(items) {
   return items.find((item) => item.date === today)?.date || items[0]?.date || "";
 }
 
-watch(transcriptDays, (nextDays) => {
+watch(daySummaries, (nextDays) => {
   if (!Array.isArray(nextDays) || !nextDays.length) {
     selectedDate.value = "";
     return;
@@ -949,16 +1610,54 @@ watch(dateSheetOpen, (open) => {
   }
 });
 
+watch(reminderSheetOpen, (open) => {
+  if (open) {
+    floatingActionsOpen.value = false;
+  }
+});
+
 watch(hourSheetOpen, (open) => {
   if (open) {
     floatingActionsOpen.value = false;
   }
 });
 
+watch(searchSheetOpen, (open) => {
+  if (open) {
+    floatingActionsOpen.value = false;
+  }
+});
+
+watch(searchResults, (results) => {
+  if (!results.length) {
+    activeSearchIndex.value = -1;
+    return;
+  }
+  if (activeSearchIndex.value < 0 || activeSearchIndex.value >= results.length) {
+    activeSearchIndex.value = 0;
+  }
+});
+
+watch(selectedDate, () => {
+  searchQuery.value = "";
+  activeSearchIndex.value = -1;
+  activeSearchTargetId.value = "";
+  searchDockPinned.value = false;
+  searchSheetOpen.value = false;
+});
+
 watch(
   visibleImageAttachments,
   async () => {
     await ensureVisibleAttachmentUrls();
+  },
+  { immediate: true },
+);
+
+watch(
+  visibleStickers,
+  async () => {
+    await ensureVisibleStickerUrls();
   },
   { immediate: true },
 );
@@ -982,6 +1681,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("scroll", updateFloatingLauncher);
   window.removeEventListener("resize", updateFloatingLauncher);
   revokeAttachmentUrls();
+  revokeStickerUrls();
 });
 </script>
 
@@ -1026,6 +1726,45 @@ onBeforeUnmount(() => {
 
 .meta-trigger--link {
   text-decoration: none;
+}
+
+.meta-trigger--active {
+  color: var(--accent);
+  border-color: rgba(49, 81, 30, 0.22);
+  background: #eef4e5;
+}
+
+.reminder-trigger__icon {
+  position: relative;
+  width: 13px;
+  height: 13px;
+  border: 1.7px solid currentColor;
+  border-radius: 50%;
+}
+
+.reminder-trigger__icon::before,
+.reminder-trigger__icon::after {
+  content: "";
+  position: absolute;
+  background: currentColor;
+}
+
+.reminder-trigger__icon::before {
+  left: 5px;
+  top: 2px;
+  width: 1.5px;
+  height: 4.5px;
+  border-radius: 999px;
+}
+
+.reminder-trigger__icon::after {
+  left: 5px;
+  top: 5.5px;
+  width: 4px;
+  height: 1.5px;
+  border-radius: 999px;
+  transform-origin: left center;
+  transform: rotate(32deg);
 }
 
 .conversation-meta {
@@ -1090,6 +1829,7 @@ onBeforeUnmount(() => {
 }
 
 .date-select-trigger,
+.search-trigger,
 .date-chip {
   appearance: none;
   border: 1px solid rgba(24, 35, 15, 0.08);
@@ -1119,6 +1859,20 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
 }
 
+.search-trigger {
+  border-radius: 999px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .date-sheet-overlay {
   position: fixed;
   inset: 0;
@@ -1131,7 +1885,8 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(4px);
 }
 
-.date-sheet {
+.date-sheet,
+.reminder-sheet {
   width: min(100%, 420px);
   max-height: min(78vh, 620px);
   display: flex;
@@ -1143,7 +1898,8 @@ onBeforeUnmount(() => {
   box-shadow: 0 20px 48px rgba(24, 35, 15, 0.18);
 }
 
-.date-sheet__header {
+.date-sheet__header,
+.reminder-sheet__header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -1157,7 +1913,8 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
-.date-sheet__header h3 {
+.date-sheet__header h3,
+.reminder-sheet__header h3 {
   margin: 4px 0 0;
   font-size: 18px;
   line-height: 1.3;
@@ -1183,6 +1940,85 @@ onBeforeUnmount(() => {
 
 .date-sheet__body {
   overflow-y: auto;
+}
+
+.reminder-sheet__body {
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+  padding-right: 2px;
+}
+
+.reminder-group {
+  display: grid;
+  gap: 8px;
+}
+
+.reminder-group__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.reminder-list {
+  display: grid;
+  gap: 8px;
+}
+
+.reminder-card {
+  border: 1px solid rgba(24, 35, 15, 0.07);
+  border-radius: 18px;
+  padding: 10px 12px;
+  background: rgba(255, 253, 249, 0.84);
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.reminder-card--internal {
+  background: rgba(255, 253, 249, 0.64);
+}
+
+.reminder-card__time {
+  color: rgba(49, 81, 30, 0.78);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.reminder-card__main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.reminder-card__label {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.reminder-card__detail {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.reminder-empty {
+  border: 1px dashed rgba(24, 35, 15, 0.12);
+  border-radius: 18px;
+  padding: 18px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  background: rgba(255, 253, 249, 0.48);
 }
 
 .date-calendar {
@@ -1218,6 +2054,118 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, #fbf7ef 0%, #f4efe6 100%);
   border-radius: 24px;
   box-shadow: 0 20px 48px rgba(24, 35, 15, 0.18);
+}
+
+.search-sheet {
+  width: min(100%, 430px);
+  max-height: min(78vh, 640px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 12px;
+  background: linear-gradient(180deg, #fbf7ef 0%, #f4efe6 100%);
+  border-radius: 24px;
+  box-shadow: 0 20px 48px rgba(24, 35, 15, 0.18);
+}
+
+.search-sheet__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.search-sheet__header h3 {
+  margin: 4px 0 0;
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.search-sheet__controls {
+  display: grid;
+  gap: 10px;
+}
+
+.search-input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(24, 35, 15, 0.08);
+  border-radius: 16px;
+  padding: 0 12px;
+  background: rgba(255, 253, 249, 0.94);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  box-shadow: 0 6px 14px rgba(24, 35, 15, 0.05);
+}
+
+.search-input:focus {
+  border-color: rgba(49, 81, 30, 0.24);
+  box-shadow: 0 0 0 3px rgba(49, 81, 30, 0.08);
+}
+
+.search-sheet__nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-sheet__status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.search-result-list {
+  overflow-y: auto;
+  display: grid;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.search-result-card {
+  appearance: none;
+  border: 1px solid rgba(24, 35, 15, 0.06);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: rgba(255, 253, 249, 0.82);
+  color: var(--ink);
+  text-align: left;
+  display: grid;
+  gap: 5px;
+}
+
+.search-result-card--active {
+  border-color: rgba(49, 81, 30, 0.22);
+  background: rgba(238, 244, 229, 0.72);
+}
+
+.search-result-card__meta {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.search-result-card__text {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.search-highlight {
+  border-radius: 5px;
+  padding: 0 2px;
+  background: rgba(217, 157, 80, 0.28);
+  color: inherit;
+}
+
+.search-empty {
+  min-height: 92px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
 }
 
 .hour-sheet__header {
@@ -1384,6 +2332,65 @@ onBeforeUnmount(() => {
   background: rgba(255, 253, 249, 0.98);
 }
 
+.search-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 86px;
+  z-index: 2090;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid rgba(24, 35, 15, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 253, 249, 0.94);
+  box-shadow: 0 12px 28px rgba(24, 35, 15, 0.14);
+  backdrop-filter: blur(12px);
+}
+
+.search-dock__main,
+.search-dock__button {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  min-height: 34px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-dock__main {
+  gap: 6px;
+  padding: 0 10px 0 12px;
+}
+
+.search-dock__label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.search-dock__count {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.search-dock__button {
+  width: 34px;
+  font-size: 15px;
+  background: rgba(238, 244, 229, 0.68);
+}
+
+.search-dock__button--close {
+  color: var(--muted);
+  background: rgba(244, 239, 229, 0.78);
+}
+
 .day-list {
   display: grid;
   gap: 22px;
@@ -1402,6 +2409,13 @@ onBeforeUnmount(() => {
   padding: 0 2px;
 }
 
+.day-divider__meta-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .day-divider__date {
   font-size: 18px;
   font-weight: 700;
@@ -1412,6 +2426,17 @@ onBeforeUnmount(() => {
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.meta-switch {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
 }
 
 .transcript {
@@ -1430,6 +2455,11 @@ onBeforeUnmount(() => {
 
 .chat-row--assistant {
   justify-items: start;
+}
+
+.chat-row--search-hit .chat-bubble {
+  outline: 2px solid rgba(49, 81, 30, 0.24);
+  box-shadow: 0 0 0 6px rgba(238, 244, 229, 0.7);
 }
 
 .chat-bubble {
@@ -1465,6 +2495,73 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 8px;
   margin-top: 10px;
+}
+
+.sticker-message-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: min(100%, 82%);
+  margin-top: -2px;
+  padding-left: 14px;
+}
+
+.sticker-message {
+  appearance: none;
+  border: 1px solid rgba(24, 35, 15, 0.08);
+  border-radius: 18px;
+  padding: 7px;
+  background: rgba(255, 253, 249, 0.76);
+}
+
+.sticker-message__image,
+.sticker-message__placeholder {
+  width: 96px;
+  height: 96px;
+  border-radius: 13px;
+}
+
+.sticker-message__image {
+  display: block;
+  object-fit: contain;
+}
+
+.sticker-message__placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 11px;
+  background: rgba(24, 35, 15, 0.04);
+}
+
+.action-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: min(100%, 82%);
+  margin-top: -4px;
+  padding-left: 14px;
+}
+
+.action-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: rgba(24, 35, 15, 0.54);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.action-tag__marker {
+  color: rgba(24, 35, 15, 0.5);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.action-tag__label {
+  line-height: 1.15;
 }
 
 .chat-image-card {
@@ -1572,8 +2669,15 @@ onBeforeUnmount(() => {
 
 @media (max-width: 640px) {
   .chat-bubble,
+  .sticker-message-row,
   .sidecar-stack {
     width: min(100%, 88%);
+  }
+
+  .sticker-message__image,
+  .sticker-message__placeholder {
+    width: 84px;
+    height: 84px;
   }
 
   .day-divider {

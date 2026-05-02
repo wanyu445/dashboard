@@ -1,4 +1,4 @@
-const STORAGE_KEY = "dashboard.auth.token";
+const STORAGE_KEY = "bashboard.auth.token";
 
 export function getStoredAuthToken() {
   return typeof window === "undefined" ? "" : String(window.localStorage.getItem(STORAGE_KEY) || "");

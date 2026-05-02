@@ -2,7 +2,7 @@
   <div class="page login-page">
     <section class="login-card section-card">
       <div class="login-card__head">
-        <div class="login-kicker">Dashboard</div>
+        <div class="login-kicker">Bashboard</div>
         <h1 class="page-title">登录</h1>
         <p class="page-subtitle">这个面板读取的是你本地的 Cyberboss 数据，进入前先验证访问口令。</p>
       </div>

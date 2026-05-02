@@ -151,8 +151,17 @@
 
         <template v-if="detailMode === 'distribution'">
           <div class="donut-wrap">
-            <div class="donut donut--interactive">
+            <div
+              class="donut"
+              :class="{
+                'donut--interactive': !distributionUsesStaticDonut,
+                'donut--static': distributionUsesStaticDonut,
+              }"
+              :style="distributionUsesStaticDonut ? distributionStaticDonutStyle : undefined"
+              @click="distributionUsesStaticDonut ? toggleCategorySelection(singleDistributionCategory?.categoryId) : undefined"
+            >
               <svg
+                v-if="!distributionUsesStaticDonut"
                 class="donut-svg"
                 viewBox="0 0 220 220"
                 aria-label="分类分布图"
@@ -676,6 +685,8 @@ const props = defineProps({
   },
 });
 
+const emit = defineEmits(["load-range"]);
+
 const rangeType = ref("day");
 const selectedRangeKeys = ref({
   day: "",
@@ -801,6 +812,16 @@ const donutSegments = computed(() => buildDonutSegments(
   selectedCategoryId.value,
 ));
 
+const distributionUsesStaticDonut = computed(() => donutSegments.value.length <= 1);
+
+const singleDistributionCategory = computed(() => (
+  Array.isArray(currentRange.value?.categories) ? currentRange.value.categories[0] || null : null
+));
+
+const distributionStaticDonutStyle = computed(() => ({
+  "--donut-static-background": distributionDonutStyle.value.background || "transparent",
+}));
+
 const breakdownSegments = computed(() => buildDonutSegments(
   Array.isArray(selectedDetail.value?.subcategories) ? selectedDetail.value.subcategories : [],
   resolveSubcategoryColor,
@@ -822,20 +843,37 @@ const selectedSubcategory = computed(() => (
   selectedDetail.value?.subcategories?.find((subcategory) => subcategory.subcategoryId === selectedSubcategoryId.value) || null
 ));
 
+const effectiveSubcategoryId = computed(() => {
+  if (selectedSubcategoryId.value) {
+    return selectedSubcategoryId.value;
+  }
+  if (detailMode.value !== "trend" && detailMode.value !== "event") {
+    return "";
+  }
+  return selectedDetailSubcategories.value.length === 1
+    ? selectedDetailSubcategories.value[0]?.subcategoryId || ""
+    : "";
+});
+
 const detailEvents = computed(() => (
   Array.isArray(selectedDetail.value?.events) ? selectedDetail.value.events : []
 ));
 
 const filteredDetailEvents = computed(() => (
-  selectedSubcategoryId.value
-    ? detailEvents.value.filter((event) => event.subcategoryId === selectedSubcategoryId.value)
+  effectiveSubcategoryId.value
+    ? detailEvents.value.filter((event) => event.subcategoryId === effectiveSubcategoryId.value)
     : detailEvents.value
 ));
 
 const trendPoints = computed(() => {
-  const basePoints = Array.isArray(selectedDetail.value?.trend) ? selectedDetail.value.trend : [];
-  if (!selectedSubcategoryId.value) {
-    return basePoints;
+  const rawBasePoints = Array.isArray(selectedDetail.value?.trend) ? selectedDetail.value.trend : [];
+  const basePoints = rawBasePoints.length
+    ? rawBasePoints
+    : buildTrendTemplateFromEvents(detailEvents.value, rangeType.value);
+  if (!effectiveSubcategoryId.value) {
+    return rawBasePoints.length
+      ? rawBasePoints
+      : buildTrendPointsFromEvents(basePoints, detailEvents.value, rangeType.value);
   }
   return buildTrendPointsFromEvents(basePoints, filteredDetailEvents.value, rangeType.value);
 });
@@ -890,6 +928,11 @@ const breakdownDonutStyle = computed(() => buildDonutStyle(
   resolveSubcategoryColor,
 ));
 
+const distributionDonutStyle = computed(() => buildDonutStyle(
+  Array.isArray(currentRange.value?.categories) ? currentRange.value.categories : [],
+  resolveCategoryColor,
+));
+
 const totalSubcategoryMinutes = computed(() => {
   const items = Array.isArray(selectedDetail.value?.subcategories) ? selectedDetail.value.subcategories : [];
   return items.reduce((sum, item) => sum + (Number(item.minutes) || 0), 0);
@@ -920,11 +963,13 @@ watch(rangeType, () => {
   syncRangeKeys();
   syncSelectedCategory();
   closeCategoryPicker();
+  requestCurrentRange();
 });
 
 watch(currentRangeKey, () => {
   syncSelectedCategory();
   closeCategoryPicker();
+  requestCurrentRange();
 });
 
 watch(
@@ -953,6 +998,16 @@ function syncRangeKeys() {
     week: resolveRangeKey("week", analyticsByType.value.week, props.selectedDate, selectedRangeKeys.value.week),
     month: resolveRangeKey("month", analyticsByType.value.month, props.selectedDate, selectedRangeKeys.value.month),
   };
+}
+
+function requestCurrentRange() {
+  if (!currentRangeKey.value) {
+    return;
+  }
+  emit("load-range", {
+    type: rangeType.value,
+    key: currentRangeKey.value,
+  });
 }
 
 function syncSelectedCategory() {
@@ -1448,6 +1503,28 @@ function buildTrendPointsFromEvents(basePoints, events, currentRangeType) {
   return template.map((point) => ({
     ...point,
     minutes: minutesByDate.get(String(point.label || point.key || "").trim()) || 0,
+  }));
+}
+
+function buildTrendTemplateFromEvents(events, currentRangeType) {
+  const list = Array.isArray(events) ? events : [];
+  if (currentRangeType === "day") {
+    return Array.from({ length: 24 }, (_, hour) => ({
+      key: hour,
+      label: `${String(hour).padStart(2, "0")}:00`,
+      minutes: 0,
+    }));
+  }
+
+  const dates = [...new Set(list
+    .map((event) => String(event?.dateLabel || "").trim())
+    .filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
+
+  return dates.map((date) => ({
+    key: date,
+    label: date,
+    minutes: 0,
   }));
 }
 

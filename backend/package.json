@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "check": "node --check src/index.js && node --check src/core/config.js && node --check src/services/auth-service.js && node --check src/services/conversation-service.js && node --check src/services/timeline-service.js && node --check src/services/diary-service.js && node --check src/services/memory-service.js && node --check src/services/state-service.js && node --check src/routes/auth.js && node --check src/routes/health.js && node --check src/routes/conversations.js && node --check src/routes/timeline.js && node --check src/routes/diary.js && node --check src/routes/memory.js && node --check src/routes/state.js"
+    "check": "node --check src/index.js && node --check src/core/config.js && node --check src/services/auth-service.js && node --check src/services/conversation-service.js && node --check src/services/timeline-service.js && node --check src/services/diary-service.js && node --check src/services/memory-service.js && node --check src/services/state-service.js && node --check src/services/sticker-service.js && node --check src/routes/auth.js && node --check src/routes/health.js && node --check src/routes/conversations.js && node --check src/routes/timeline.js && node --check src/routes/diary.js && node --check src/routes/memory.js && node --check src/routes/state.js && node --check src/routes/stickers.js"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

@@ -6,6 +6,7 @@
           <div class="title-meta">
             <h1 class="page-title">时间轴</h1>
             <button
+              ref="metaTriggerRef"
               type="button"
               class="meta-trigger"
               :class="{ 'meta-trigger--active': metaTipOpen }"
@@ -53,7 +54,7 @@
           </div>
         </div>
 
-        <section v-if="metaTipOpen" class="meta-popover section-card">
+        <section v-if="metaTipOpen" ref="metaTipRef" class="meta-popover section-card">
           <div class="meta-row">
             <span>已收录日期</span>
             <strong>{{ overview.meta?.availableDates?.length || 0 }}</strong>
@@ -65,10 +66,6 @@
           <div class="meta-row">
             <span>记录条目</span>
             <strong>{{ overview.factsSummary?.factCount || 0 }}</strong>
-          </div>
-          <div class="meta-row">
-            <span>页面用途</span>
-            <strong>查看某天做了什么，并切到分布页看时间分配</strong>
           </div>
         </section>
       </div>
@@ -109,6 +106,10 @@
     <van-notice-bar v-else-if="error" color="#8b1538" background="#fdecef" :text="error" />
 
     <div v-else class="timeline-grid">
+      <div v-if="detailLoading" class="detail-loading-pill">
+        <span class="detail-loading-dot"></span>
+        正在载入详情
+      </div>
       <template v-if="activeView === 'timeline'">
         <section class="days-section">
           <van-empty v-if="!selectedDay" description="还没读到 timeline 日数据" />
@@ -136,6 +137,7 @@
         v-else
         :analytics="analytics"
         :selected-date="selectedDate"
+        @load-range="ensureTimelineRange"
       />
     </div>
 
@@ -143,6 +145,7 @@
       v-model:show="weekSheetOpen"
       :weeks="recentWeeks"
       :selected-date="selectedDate"
+      @load-week="ensureTimelineWeek"
       @select-day="selectedDate = $event"
     />
 
@@ -234,6 +237,8 @@ const loading = ref(false);
 const error = ref("");
 const overview = ref({});
 const metaTipOpen = ref(false);
+const metaTipRef = ref(null);
+const metaTriggerRef = ref(null);
 const dateSheetOpen = ref(false);
 const currentCalendarMonth = ref("");
 const selectedDate = ref("");
@@ -242,6 +247,17 @@ const weekSheetOpen = ref(false);
 const activeView = ref("timeline");
 const dateNavRef = ref(null);
 const showScrollTopFab = ref(false);
+const dayCache = ref({});
+const weekCache = ref({});
+const rangeCache = ref({
+  day: {},
+  week: {},
+  month: {},
+});
+const pendingDetailCount = ref(0);
+let loadVersion = 0;
+
+const detailLoading = computed(() => pendingDetailCount.value > 0);
 
 const recentDays = computed(() => Array.isArray(overview.value?.recentDays) ? overview.value.recentDays : []);
 const recentWeeks = computed(() => Array.isArray(overview.value?.recentWeeks) ? overview.value.recentWeeks : []);
@@ -267,17 +283,174 @@ const activeCalendarMonth = computed(() => buildCalendarMonth(
 ));
 
 async function load() {
+  loadVersion += 1;
+  const version = loadVersion;
   loading.value = true;
   error.value = "";
+  pendingDetailCount.value = 0;
   try {
-    overview.value = await cyberbossApi.fetchTimeline();
+    dayCache.value = {};
+    weekCache.value = {};
+    rangeCache.value = { day: {}, week: {}, month: {} };
+    const index = await cyberbossApi.fetchTimelineIndex();
+    if (version !== loadVersion) {
+      return;
+    }
+    overview.value = normalizeTimelineIndex(index);
     selectedDate.value = resolveDefaultDate(recentDays.value);
+    await ensureTimelineDay(selectedDate.value);
+    await ensureTimelineRange({ type: "day", key: selectedDate.value });
+    if (version !== loadVersion) {
+      return;
+    }
     selectedItemId.value = firstItemIdForDate(selectedDate.value);
   } catch (err) {
-    error.value = err.message;
+    if (version === loadVersion) {
+      error.value = err.message;
+    }
   } finally {
-    loading.value = false;
+    if (version === loadVersion) {
+      loading.value = false;
+    }
   }
+}
+
+async function ensureTimelineDay(date) {
+  const version = loadVersion;
+  const normalizedDate = String(date || "").trim();
+  if (!normalizedDate || dayCache.value[normalizedDate]) {
+    return;
+  }
+  beginDetailLoad();
+  try {
+    const day = await cyberbossApi.fetchTimelineDay(normalizedDate);
+    if (version !== loadVersion) {
+      return;
+    }
+    dayCache.value = {
+      ...dayCache.value,
+      [normalizedDate]: day,
+    };
+    mergeDayIntoOverview(day);
+  } catch (err) {
+    if (version === loadVersion) {
+      error.value = err.message;
+    }
+  } finally {
+    endDetailLoad();
+  }
+}
+
+async function ensureTimelineWeek(weekKey) {
+  const version = loadVersion;
+  const normalizedKey = String(weekKey || "").trim();
+  if (!normalizedKey || weekCache.value[normalizedKey]) {
+    return;
+  }
+  beginDetailLoad();
+  try {
+    const week = await cyberbossApi.fetchTimelineWeek(normalizedKey);
+    if (version !== loadVersion) {
+      return;
+    }
+    weekCache.value = {
+      ...weekCache.value,
+      [normalizedKey]: week,
+    };
+    mergeWeekIntoOverview(week);
+  } catch (err) {
+    if (version === loadVersion) {
+      error.value = err.message;
+    }
+  } finally {
+    endDetailLoad();
+  }
+}
+
+async function ensureTimelineRange(payload) {
+  const version = loadVersion;
+  const type = String(payload?.type || "").trim();
+  const key = String(payload?.key || "").trim();
+  if (!type || !key || rangeCache.value[type]?.[key]) {
+    return;
+  }
+  beginDetailLoad();
+  try {
+    const range = await cyberbossApi.fetchTimelineRange(type, key);
+    if (version !== loadVersion) {
+      return;
+    }
+    rangeCache.value = {
+      ...rangeCache.value,
+      [type]: {
+        ...(rangeCache.value[type] || {}),
+        [key]: range,
+      },
+    };
+    mergeRangeIntoOverview(type, range);
+  } catch (err) {
+    if (version === loadVersion) {
+      error.value = err.message;
+    }
+  } finally {
+    endDetailLoad();
+  }
+}
+
+function beginDetailLoad() {
+  pendingDetailCount.value += 1;
+}
+
+function endDetailLoad() {
+  pendingDetailCount.value = Math.max(0, pendingDetailCount.value - 1);
+}
+
+function normalizeTimelineIndex(index) {
+  return {
+    ...index,
+    recentDays: Array.isArray(index?.recentDays) ? index.recentDays : [],
+    recentWeeks: Array.isArray(index?.recentWeeks) ? index.recentWeeks : [],
+    analytics: {
+      day: Array.isArray(index?.rangeIndex?.day) ? index.rangeIndex.day : [],
+      week: Array.isArray(index?.rangeIndex?.week) ? index.rangeIndex.week : [],
+      month: Array.isArray(index?.rangeIndex?.month) ? index.rangeIndex.month : [],
+    },
+  };
+}
+
+function mergeDayIntoOverview(day) {
+  if (!day?.date) {
+    return;
+  }
+  overview.value = {
+    ...overview.value,
+    recentDays: recentDays.value.map((entry) => entry.date === day.date ? { ...entry, ...day } : entry),
+  };
+}
+
+function mergeWeekIntoOverview(week) {
+  if (!week?.key) {
+    return;
+  }
+  overview.value = {
+    ...overview.value,
+    recentWeeks: recentWeeks.value.map((entry) => entry.key === week.key ? { ...entry, ...week } : entry),
+  };
+}
+
+function mergeRangeIntoOverview(type, range) {
+  if (!type || !range?.key) {
+    return;
+  }
+  const currentAnalytics = overview.value?.analytics || {};
+  const list = Array.isArray(currentAnalytics[type]) ? currentAnalytics[type] : [];
+  overview.value = {
+    ...overview.value,
+    analytics: {
+      ...currentAnalytics,
+      [type]: list.map((entry) => entry.key === range.key ? { ...entry, ...range } : entry),
+    },
+  };
 }
 
 function updateScrollTopFab() {
@@ -348,6 +521,20 @@ function handleDatePick(date) {
 
 function toggleActiveView() {
   activeView.value = activeView.value === "timeline" ? "distribution" : "timeline";
+}
+
+function closeMetaTipOnOutsidePointer(event) {
+  if (!metaTipOpen.value) {
+    return;
+  }
+  const target = event?.target;
+  if (!(target instanceof Node)) {
+    return;
+  }
+  if (metaTipRef.value?.contains(target) || metaTriggerRef.value?.contains(target)) {
+    return;
+  }
+  metaTipOpen.value = false;
 }
 
 function switchCalendarMonth(direction) {
@@ -467,8 +654,16 @@ function todayDate() {
   }).format(new Date());
 }
 
-watch(selectedDate, (value) => {
+watch(selectedDate, async (value) => {
+  await ensureTimelineDay(value);
+  await ensureTimelineRange({ type: "day", key: value });
   selectedItemId.value = firstItemIdForDate(value);
+});
+
+watch(activeView, async (value) => {
+  if (value === "distribution") {
+    await ensureTimelineRange({ type: "day", key: selectedDate.value });
+  }
 });
 
 watch(dateSheetOpen, (open) => {
@@ -488,11 +683,13 @@ watch(
 
 onMounted(() => {
   load();
+  document.addEventListener("pointerdown", closeMetaTipOnOutsidePointer);
   window.addEventListener("scroll", updateScrollTopFab, { passive: true });
   window.addEventListener("resize", updateScrollTopFab);
 });
 
 onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", closeMetaTipOnOutsidePointer);
   window.removeEventListener("scroll", updateScrollTopFab);
   window.removeEventListener("resize", updateScrollTopFab);
 });
@@ -615,6 +812,39 @@ onBeforeUnmount(() => {
 .timeline-grid {
   display: grid;
   gap: 14px;
+}
+
+.detail-loading-pill {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(24, 35, 15, 0.08);
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: rgba(255, 253, 249, 0.82);
+  color: rgba(109, 115, 95, 0.86);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.detail-loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: detailPulse 900ms ease-in-out infinite;
+}
+
+@keyframes detailPulse {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .date-nav {

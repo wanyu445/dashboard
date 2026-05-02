@@ -11,11 +11,12 @@ const timelineRoutes = require("./routes/timeline");
 const diaryRoutes = require("./routes/diary");
 const memoryRoutes = require("./routes/memory");
 const stateRoutes = require("./routes/state");
+const stickerRoutes = require("./routes/stickers");
 const weixinInstructionsRoutes = require("./routes/weixin-instructions");
 
 async function buildServer() {
   const config = readConfig();
-  const app = fastify({ logger: true });
+  const app = fastify({ logger: { level: config.logLevel } });
   const auth = createAuthService(config);
 
   app.decorate("config", config);
@@ -39,6 +40,7 @@ async function buildServer() {
   await app.register(diaryRoutes);
   await app.register(memoryRoutes);
   await app.register(stateRoutes);
+  await app.register(stickerRoutes);
   await app.register(weixinInstructionsRoutes);
 
   if (config.siteAvailable) {
@@ -99,7 +101,8 @@ function isPublicRequest(req) {
   return pathname === "/api/health"
     || pathname === "/api/auth/config"
     || pathname === "/api/auth/login"
-    || (!pathname.startsWith("/api") && !pathname.startsWith("/timeline-site/"));
+    || pathname.startsWith("/timeline-site/")
+    || !pathname.startsWith("/api");
 }
 
 if (require.main === module) {

@@ -218,7 +218,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["update:show", "select-day"]);
+const emit = defineEmits(["update:show", "select-day", "load-week"]);
 
 const currentWeekKey = ref("");
 const selectedItemId = ref("");
@@ -318,6 +318,7 @@ watch(
       return;
     }
     currentWeekKey.value = resolveWeekKey(props.weeks, props.selectedDate);
+    requestActiveWeek();
     selectedItemId.value = resolveDefaultItemId(activeWeek.value, props.selectedDate);
     weekPickerMonth.value = resolveWeekPickerMonth();
   },
@@ -325,9 +326,16 @@ watch(
 );
 
 watch(currentWeekKey, () => {
+  requestActiveWeek();
   selectedItemId.value = resolveDefaultItemId(activeWeek.value, props.selectedDate);
   weekPickerMonth.value = resolveWeekPickerMonth();
 });
+
+function requestActiveWeek() {
+  if (currentWeekKey.value) {
+    emit("load-week", currentWeekKey.value);
+  }
+}
 
 function handleDayClick(date) {
   emit("select-day", date);

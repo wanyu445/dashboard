@@ -20,8 +20,9 @@ function readConfig() {
     cyberbossProjectRoot,
     stateDir,
     logDir,
-    port: Number(process.env.CYBERBOSS_DASHBOARD_PORT) || 3011,
+    port: Number(process.env.CYBERBOSS_DASHBOARD_PORT) || 3000,
     host: normalizeText(process.env.CYBERBOSS_DASHBOARD_HOST) || "0.0.0.0",
+    logLevel: normalizeLogLevel(process.env.CYBERBOSS_DASHBOARD_LOG_LEVEL),
     authPassword: normalizeText(process.env.CYBERBOSS_DASHBOARD_AUTH_PASSWORD),
     authSessionDays: Number(process.env.CYBERBOSS_DASHBOARD_AUTH_SESSION_DAYS) || 30,
     distDir,
@@ -46,9 +47,19 @@ function readConfig() {
     proactiveMessageHistoryFile: path.join(stateDir, "proactive-message-history.json"),
     deferredSystemRepliesFile: path.join(stateDir, "deferred-system-replies.json"),
     locationsFile: path.join(stateDir, "locations.json"),
+    weatherStateFile: path.join(stateDir, "weather-state.json"),
+    stickersDir: path.join(stateDir, "stickers"),
+    stickerAssetsDir: path.join(stateDir, "stickers", "assets"),
+    stickersIndexFile: path.join(stateDir, "stickers", "index.json"),
+    stickerTagsFile: path.join(stateDir, "stickers", "tags.json"),
+    stickersTemplateDir: path.join(cyberbossProjectRoot, "templates", "stickers"),
+    stickerAssetsTemplateDir: path.join(cyberbossProjectRoot, "templates", "stickers", "assets"),
+    stickersTemplateIndexFile: path.join(cyberbossProjectRoot, "templates", "stickers", "index.json"),
+    stickerTagsTemplateFile: path.join(cyberbossProjectRoot, "templates", "stickers", "tags.json"),
     accountDir: path.join(stateDir, "accounts"),
     weixinInstructionsFile: resolveExistingPath([
       process.env.CYBERBOSS_WEIXIN_INSTRUCTIONS_FILE,
+      path.join(stateDir, "weixin-instructions.md"),
       path.join(cyberbossProjectRoot, "templates", "weixin-instructions.md"),
       path.join(projectRoot, "templates", "weixin-instructions.md"),
     ]),
@@ -62,6 +73,13 @@ function resolvePath(value) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeLogLevel(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  return ["fatal", "error", "warn", "info", "debug", "trace", "silent"].includes(normalized)
+    ? normalized
+    : "error";
 }
 
 function resolveExistingPath(candidates) {

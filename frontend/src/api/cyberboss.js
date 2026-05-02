@@ -10,6 +10,12 @@ export const cyberbossApi = {
   fetchConversations(limit = 7) {
     return client.get("/conversations", { params: { limit } });
   },
+  fetchConversationDays(limit = 31) {
+    return client.get("/conversations/days", { params: { limit } });
+  },
+  fetchConversationDay(date) {
+    return client.get("/conversations/day", { params: { date } });
+  },
   fetchConversationAttachmentBlob(filePath) {
     return client.get("/conversations/attachment", {
       params: { path: filePath },
@@ -18,6 +24,18 @@ export const cyberbossApi = {
   },
   fetchTimeline() {
     return client.get("/timeline");
+  },
+  fetchTimelineIndex() {
+    return client.get("/timeline/index");
+  },
+  fetchTimelineDay(date) {
+    return client.get(`/timeline/day/${encodeURIComponent(date)}`);
+  },
+  fetchTimelineWeek(weekKey) {
+    return client.get(`/timeline/week/${encodeURIComponent(weekKey)}`);
+  },
+  fetchTimelineRange(type, key) {
+    return client.get(`/timeline/range/${encodeURIComponent(type)}/${encodeURIComponent(key)}`);
   },
   fetchDiaryFiles() {
     return client.get("/diary");
@@ -33,6 +51,14 @@ export const cyberbossApi = {
   },
   fetchState() {
     return client.get("/state");
+  },
+  fetchStickers() {
+    return client.get("/stickers");
+  },
+  fetchStickerBlob(stickerId) {
+    return client.get(`/stickers/${encodeURIComponent(stickerId)}/image`, {
+      responseType: "blob",
+    });
   },
   fetchWeixinInstructions() {
     return client.get("/weixin-instructions");

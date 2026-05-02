@@ -1,18 +1,18 @@
 # Dashboard
 
 给 `Cyberboss` 用的本地查看面板。
-`Cyberboss`的项目地址：`https://github.com/WenXiaoWendy/cyberboss`
+`Cyberboss` 的项目地址：`https://github.com/WenXiaoWendy/cyberboss`
 
 它主要解决两件事：
 
 - 不上云端也能在手机或电脑浏览器里查看 `timeline / diary / memory / state / conversation`
-- 把 `thinking`、工具调用、对话消息整理成更适合日常查看的移动端界面
+- 把 `thinking`、工具调用、对话消息、提醒和表情包整理成更适合日常查看的移动端界面
 
 ## 仓库结构
 
 ```text
 dashboard/
-  backend/   Fastify API
+  backend/   Fastify API，也可以托管 frontend/dist
   frontend/  Vue 3 + Vite + Vant
 ```
 
@@ -26,12 +26,36 @@ dashboard/
 
 - `timeline / diary / memory / state` 来自 `~/.cyberboss`
 - `conversation` 读取 `~/.cyberboss/conversations/*.jsonl`
+- 现场页会读取最近定位、电量、天气和表情包索引
+- 对话页会读取提醒队列，并把“和我相关”的下一条提醒放在顶部
 
-这个仓库本身不包含你的个人数据，它只是在运行时去读这些目录。
+常见文件包括：
+
+```text
+conversations/YYYY-MM-DD.jsonl
+timeline/timeline-facts.json
+timeline/timeline-taxonomy.json
+timeline/timeline-state.json
+diary/*.md
+memory/*.md
+reminder-queue.json
+sessions.json
+sleep-state.json
+presence-state.json
+locations.json
+weather-state.json
+stickers/index.json
+stickers/tags.json
+stickers/assets/*
+weixin-instructions.md
+```
+
+这个仓库本身不包含你的个人数据，它只是在运行时去读这些目录。不要把自己的 `~/.cyberboss`、截图缓存或对话日志提交到仓库。
 
 ## 环境要求
 
 - Node.js `>= 18`
+- npm
 - 一份正在运行或已经产出数据的 `Cyberboss`
 
 ## 开发模式
@@ -46,7 +70,7 @@ npm run dev
 
 默认监听：
 
-- `http://0.0.0.0:30xx`
+- `http://0.0.0.0:3000`
 
 ### 2. 启动前端
 
@@ -58,9 +82,9 @@ npm run dev
 
 默认监听：
 
-- `http://0.0.0.0:51xx`
+- `http://0.0.0.0:5173`
 
-前端开发服务器会把 `/api` 和 `/timeline-site` 代理到后端的 `30xx` 端口。
+前端开发服务器会把 `/api` 和 `/timeline-site` 代理到后端端口。
 
 ## 单服务部署
 
@@ -87,8 +111,10 @@ npm start
 常用环境变量如下：
 
 - `CYBERBOSS_STATE_DIR`
+- `CYBERBOSS_LOG_DIR`
 - `CYBERBOSS_DASHBOARD_HOST`
 - `CYBERBOSS_DASHBOARD_PORT`
+- `CYBERBOSS_DASHBOARD_LOG_LEVEL`
 - `CYBERBOSS_DASHBOARD_AUTH_PASSWORD`
 - `CYBERBOSS_DASHBOARD_AUTH_SESSION_DAYS`
 - `CYBERBOSS_DASHBOARD_DIST_DIR`
@@ -101,6 +127,8 @@ npm start
 
 - 后端会自动读取 `backend/.env` 和 `backend/.env.local`
 - shell / pm2 / systemd 注入的同名环境变量优先级更高
+- `CYBERBOSS_DASHBOARD_LOG_LEVEL` 默认建议用 `error`，避免生产窗口刷日志
+- `CYBERBOSS_PROJECT_ROOT` 用来找 `Cyberboss` 模板资源，比如表情包模板和微信说明模板
 
 ## 鉴权
 
@@ -120,9 +148,19 @@ CYBERBOSS_DASHBOARD_AUTH_PASSWORD=your-password
 
 前端会自动显示登录页。登录成功后，会把会话 token 保存在浏览器本地，并在后续请求里自动带上。
 
+## 当前包含的页面
+
+- 对话
+- 时间轴
+- 日记
+- 记忆
+- 现场
+- 状态
+- 微信指令查看
+
 ## 对话页接入 Cyberboss
 
-`timeline / diary / memory / state` 只要本地状态目录存在就能工作。  
+`timeline / diary / memory / state / 现场` 只要本地状态目录存在就能工作。  
 `conversation` 页面额外要求 `Cyberboss` 主项目把结构化会话日志写入：
 
 - `~/.cyberboss/conversations/YYYY-MM-DD.jsonl`
@@ -133,6 +171,7 @@ CYBERBOSS_DASHBOARD_AUTH_PASSWORD=your-password
 - `src/core/config.js`
 - `src/services/conversation-recorder.js`
 - `src/core/app.js`
+- `src/adapters/runtime/claudecode/process-client.js`
 - `src/adapters/runtime/claudecode/events.js`
 - `src/adapters/runtime/codex/events.js`
 
@@ -261,20 +300,66 @@ CYBERBOSS_DASHBOARD_AUTH_PASSWORD=your-password
 
 不需要把 provider 自己的原始日志格式直接喂给前端。
 
+## 表情包支持
+
+dashboard 会优先读取当前状态目录里的表情包：
+
+```text
+~/.cyberboss/stickers/index.json
+~/.cyberboss/stickers/tags.json
+~/.cyberboss/stickers/assets/*.gif
+```
+
+如果状态目录里没有表情包索引，会尝试读取 `Cyberboss` 项目里的模板表情包。
+
+如果 `Cyberboss` 工具调用里有：
+
+```text
+cyberboss_sticker_send
+```
+
+且参数里有 `stickerId`，对话页会把对应表情包图片挂在 bot 气泡下方。
+
+## 现场和提醒
+
+现场页会展示最近定位、电量和天气，并提供表情包库查看和标签筛选。
+
+对话页默认摘要只显示“和我相关”的下一条提醒。分类规则：
+
+- 和我相关：普通提醒、睡眠确认、起床确认、睡眠过长确认、状态确认、失联确认
+- 系统维护：日记、记忆回顾、时间轴确认、其他 `__cyberboss_...` 内部维护任务
+
+小闹钟按钮会展示完整提醒列表。
+
+## 验证
+
+后端：
+
+```bash
+cd backend
+npm run check
+```
+
+前端：
+
+```bash
+cd frontend
+npm run build
+```
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:3000/api/health
+```
+
 ## 分享给别人前需要注意
 
 - 不要把你自己的 `~/.cyberboss`、截图缓存或对话日志一起提交
 - 不要提交 `node_modules` 和 `dist`
+- 不要提交 `backend/.env` 和 `backend/.env.local`
+- `backend/.env.example` 可以提交，里面不要放真实口令、端口规划或个人路径
 - 如果你改过 `Cyberboss` 主项目来生成结构化会话记录，建议在说明里写清楚版本或补丁来源
-
-## 当前包含的页面
-
-- 对话
-- 时间轴
-- 日记
-- 记忆
-- 状态
-- 微信指令查看
 
 ## 适合的使用方式
 

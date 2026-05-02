@@ -1,5 +1,7 @@
 const {
   listConversationDays,
+  listConversationDaySummaries,
+  getConversationDay,
   listConversationLogFiles,
 } = require("../services/conversation-service");
 const fs = require("fs");
@@ -9,6 +11,22 @@ async function conversationRoutes(app) {
   app.get("/api/conversations", async (req) => {
     const limit = Number(req.query.limit) || 7;
     return listConversationDays(app.config, { limit });
+  });
+
+  app.get("/api/conversations/days", async (req) => {
+    const limit = Number(req.query.limit) || 31;
+    return {
+      days: listConversationDaySummaries(app.config, { limit }),
+    };
+  });
+
+  app.get("/api/conversations/day", async (req, reply) => {
+    const day = getConversationDay(app.config, req.query?.date);
+    if (!day) {
+      reply.code(404);
+      return { message: "未找到对应日期的会话记录" };
+    }
+    return { day };
   });
 
   app.get("/api/conversations/files", async () => ({
