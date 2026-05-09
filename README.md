@@ -1,7 +1,8 @@
 # Dashboard
 
 给 `Cyberboss` 用的本地查看面板。
-`Cyberboss` 的项目地址：`https://github.com/WenXiaoWendy/cyberboss`
+- `Cyberboss` 的项目地址：`https://github.com/WenXiaoWendy/cyberboss`
+- `leave_note` 功能的项目地址：`https://github.com/writerlyra/leave_note`
 
 它主要解决两件事：
 
