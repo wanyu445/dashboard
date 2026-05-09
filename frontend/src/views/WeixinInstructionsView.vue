@@ -1,18 +1,30 @@
 <template>
   <div class="page">
     <section class="page-head">
-      <div class="title-meta">
-        <h1 class="page-title">微信说明</h1>
-        <button
-          type="button"
-          class="meta-trigger"
-          title="同步数据"
-          @click="load"
-        >
-          ↻
-        </button>
+      <div class="page-title-row">
+        <div class="title-meta">
+          <h1 class="page-title">微信说明</h1>
+          <button
+            type="button"
+            class="meta-trigger"
+            title="同步数据"
+            @click="load"
+          >
+            ↻
+          </button>
+        </div>
+        <div class="title-actions">
+          <button
+            type="button"
+            class="meta-pill"
+            :title="activeView === 'instructions' ? '切换到操作' : '切换到说明'"
+            @click="toggleActiveView"
+          >
+            {{ activeView === "instructions" ? "操作" : "说明" }}
+          </button>
+        </div>
       </div>
-      <p class="page-subtitle">直接读取 `weixin-instructions.md`，按 Markdown 展示。</p>
+      <p class="page-subtitle">{{ activeSubtitle }}</p>
     </section>
 
     <van-loading v-if="loading" size="24px" vertical>加载中</van-loading>
@@ -20,12 +32,12 @@
 
     <section v-else class="section-card file-card">
       <div class="file-header">
-        <strong>{{ current.fileName || "weixin-instructions.md" }}</strong>
+        <strong>{{ currentDocument.fileName || fallbackFileName }}</strong>
       </div>
       <div
-        v-if="current.text"
+        v-if="currentDocument.text"
         class="markdown-body"
-        v-html="renderMarkdown(current.text)"
+        v-html="renderMarkdown(currentDocument.text)"
       ></div>
       <div v-else class="empty-copy">还没有内容</div>
     </section>
@@ -33,23 +45,46 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { cyberbossApi } from "../api/cyberboss";
 
 const loading = ref(false);
 const error = ref("");
-const current = ref({});
+const documents = ref({ instructions: {}, operations: {} });
+const activeView = ref("instructions");
+
+const currentDocument = computed(() => (
+  activeView.value === "operations" ? documents.value.operations || {} : documents.value.instructions || {}
+));
+
+const activeSubtitle = computed(() => (
+  activeView.value === "operations"
+    ? "直接读取 `weixin-operations.md`，按 Markdown 展示。"
+    : "直接读取 `weixin-instructions.md`，按 Markdown 展示。"
+));
+
+const fallbackFileName = computed(() => (
+  activeView.value === "operations" ? "weixin-operations.md" : "weixin-instructions.md"
+));
 
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    current.value = await cyberbossApi.fetchWeixinInstructions();
+    const payload = await cyberbossApi.fetchWeixinInstructions();
+    documents.value = {
+      instructions: payload?.instructions || {},
+      operations: payload?.operations || {},
+    };
   } catch (err) {
     error.value = err.message;
   } finally {
     loading.value = false;
   }
+}
+
+function toggleActiveView() {
+  activeView.value = activeView.value === "instructions" ? "operations" : "instructions";
 }
 
 function renderMarkdown(source) {
@@ -210,11 +245,24 @@ onMounted(load);
   margin-bottom: 18px;
 }
 
+.page-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .title-meta {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.title-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .meta-trigger {
@@ -236,8 +284,28 @@ onMounted(load);
   box-shadow: 0 6px 14px rgba(24, 35, 15, 0.05);
 }
 
+.meta-pill {
+  appearance: none;
+  border: 1px solid rgba(24, 35, 15, 0.08);
+  border-radius: 999px;
+  min-height: 28px;
+  padding: 0 12px;
+  background: rgba(255, 253, 249, 0.92);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 14px rgba(24, 35, 15, 0.05);
+}
+
 .file-card {
   padding: 14px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .file-header {
@@ -254,6 +322,9 @@ onMounted(load);
   color: var(--ink);
   font-size: 14px;
   line-height: 1.7;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-body :deep(h1),
@@ -284,6 +355,7 @@ onMounted(load);
 .markdown-body :deep(blockquote),
 .markdown-body :deep(pre) {
   margin: 0 0 12px;
+  min-width: 0;
 }
 
 .markdown-body :deep(ul),
@@ -303,13 +375,18 @@ onMounted(load);
 }
 
 .markdown-body :deep(pre) {
+  max-width: 100%;
   overflow-x: auto;
+  overflow-y: hidden;
   padding: 12px;
   border-radius: 12px;
   background: rgba(24, 35, 15, 0.06);
+  white-space: pre;
+  box-sizing: border-box;
 }
 
 .markdown-body :deep(code) {
+  max-width: 100%;
   font-family: "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
   font-size: 13px;
 }
@@ -317,6 +394,7 @@ onMounted(load);
 .markdown-body :deep(p code),
 .markdown-body :deep(li code),
 .markdown-body :deep(blockquote code) {
+  white-space: break-spaces;
   padding: 1px 5px;
   border-radius: 6px;
   background: rgba(24, 35, 15, 0.06);
@@ -325,6 +403,8 @@ onMounted(load);
 .markdown-body :deep(a) {
   color: var(--accent);
   text-decoration: none;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-body :deep(hr) {

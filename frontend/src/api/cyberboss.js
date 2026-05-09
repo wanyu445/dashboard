@@ -16,6 +16,9 @@ export const cyberbossApi = {
   fetchConversationDay(date) {
     return client.get("/conversations/day", { params: { date } });
   },
+  fetchConversationSearch(query, limit = 200) {
+    return client.get("/conversations/search", { params: { q: query, limit } });
+  },
   fetchConversationAttachmentBlob(filePath) {
     return client.get("/conversations/attachment", {
       params: { path: filePath },
@@ -48,6 +51,12 @@ export const cyberbossApi = {
   },
   fetchMemoryFile(fileName) {
     return client.get(`/memory/${encodeURIComponent(fileName)}`);
+  },
+  fetchNoteDates() {
+    return client.get("/notes/dates");
+  },
+  fetchNotesByDate(date) {
+    return client.get("/notes/day", { params: { date } });
   },
   fetchState() {
     return client.get("/state");

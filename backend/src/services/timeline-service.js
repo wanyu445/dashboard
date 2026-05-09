@@ -273,6 +273,19 @@ function resolveCategory(lookups, categoryId) {
   if (category) {
     return category;
   }
+  if (normalized.includes(".")) {
+    const fallbackId = normalized.split(".")[0];
+    const fallbackCategory = lookups.categoryById.get(fallbackId);
+    if (fallbackCategory) {
+      return fallbackCategory;
+    }
+    return {
+      id: fallbackId,
+      label: fallbackId,
+      color: `var(--cat-${sanitizeClassToken(fallbackId)})`,
+      children: [],
+    };
+  }
   return {
     id: normalized,
     label: normalized,
@@ -730,10 +743,11 @@ function getEventMinuteRange(event) {
 }
 
 function toTimelineItem(event, date, index) {
+  const normalizedCategoryId = normalizeCategoryColorKey(event.categoryId) || "state";
   return {
     id: `${date}:${event.id || event.eventNodeId || index}`,
     content: event.title,
-    className: `cat-${sanitizeClassToken(event.categoryId)}`,
+    className: `cat-${sanitizeClassToken(normalizedCategoryId)}`,
     start: event.startAt,
     end: event.endAt,
     title: event.title,
@@ -905,6 +919,14 @@ function getParts(formatter, date) {
 
 function sanitizeClassToken(value) {
   return normalizeText(value).toLowerCase().replace(/[^a-z0-9_-]+/gu, "-") || "state";
+}
+
+function normalizeCategoryColorKey(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  return normalized.includes(".") ? normalized.split(".")[0] : normalized;
 }
 
 function normalizeText(value) {

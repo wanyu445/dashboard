@@ -3,6 +3,7 @@ const {
   listConversationDaySummaries,
   getConversationDay,
   listConversationLogFiles,
+  searchConversationMessages,
 } = require("../services/conversation-service");
 const fs = require("fs");
 const path = require("path");
@@ -27,6 +28,16 @@ async function conversationRoutes(app) {
       return { message: "未找到对应日期的会话记录" };
     }
     return { day };
+  });
+
+  app.get("/api/conversations/search", async (req, reply) => {
+    const q = typeof req.query?.q === "string" ? req.query.q.trim() : "";
+    if (!q) {
+      reply.code(400);
+      return { message: "缺少搜索关键词", query: "", results: [] };
+    }
+    const limit = Number(req.query?.limit) || 200;
+    return searchConversationMessages(app.config, q, { limit });
   });
 
   app.get("/api/conversations/files", async () => ({

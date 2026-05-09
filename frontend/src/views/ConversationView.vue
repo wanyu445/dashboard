@@ -35,6 +35,15 @@
           >
             <span class="reminder-trigger__icon" aria-hidden="true"></span>
           </button>
+          <button
+            type="button"
+            class="meta-trigger note-trigger"
+            :class="{ 'meta-trigger--active': noteSheetOpen }"
+            title="小纸条"
+            @click="openNoteSheet"
+          >
+            <span class="note-trigger__icon" aria-hidden="true"></span>
+          </button>
         </div>
       </div>
       <p class="page-subtitle">聊天正文单独看，Thinking 和工具调用缩成挂在回复附近的小折叠。</p>
@@ -62,7 +71,7 @@
           v-if="filteredTranscriptDays.length"
           type="button"
           class="search-trigger"
-          title="搜索当前日期"
+          title="搜索全部消息"
           @click="openSearchSheet"
         >
           ⌕
@@ -97,14 +106,29 @@
         <div class="transcript">
           <template v-for="item in day.items" :key="item.id">
             <article
-              v-if="item.kind === 'message'"
+              v-if="item.kind === 'message' || item.kind === 'note-notice'"
               :ref="(element) => setMessageRef(item.id, element)"
               class="chat-row"
               :class="[
-                `chat-row--${item.role}`,
+                item.kind === 'note-notice' ? 'chat-row--note-notice' : `chat-row--${item.role}`,
                 { 'chat-row--search-hit': activeSearchTargetId === item.id },
               ]"
             >
+              <template v-if="item.kind === 'note-notice'">
+                <div class="desk-note">
+                  <div class="desk-note__kicker">小纸条</div>
+                  <div class="desk-note__sheet">
+                    <div class="desk-note__meta">
+                      <span class="desk-note__from">{{ extractNoteCardLabel(item.text) }}</span>
+                      <span class="desk-note__time mono">{{ formatTime(item.timestamp) }}</span>
+                    </div>
+                    <div class="desk-note__body">
+                      {{ extractNoteCardBody(item.text) }}
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <template v-else>
               <div
                 v-if="item.role === 'assistant' && item.before.length"
                 class="sidecar-stack sidecar-stack--before"
@@ -201,6 +225,7 @@
                   <pre class="sidecar-fold__body pre-wrap mono">{{ cleanEventText(meta.text) }}</pre>
                 </details>
               </div>
+              </template>
             </article>
 
             <article
@@ -227,6 +252,112 @@
         </div>
       </section>
     </div>
+
+    <teleport to="body">
+      <div v-if="noteSheetOpen" class="date-sheet-overlay" @click.self="noteSheetOpen = false">
+        <div class="reminder-sheet note-sheet">
+          <div class="reminder-sheet__header">
+            <div>
+              <div class="date-sheet__kicker">小纸条</div>
+              <h3>
+                <button type="button" class="note-date-trigger" @click="noteDateSheetOpen = true">
+                  <span>{{ noteListTitle }}</span>
+                  <span class="note-date-trigger__icon">⌄</span>
+                </button>
+              </h3>
+            </div>
+            <button type="button" class="modal-close" aria-label="关闭" @click="noteSheetOpen = false">×</button>
+          </div>
+
+          <div class="reminder-sheet__body note-sheet__body">
+            <div v-if="noteLoading" class="reminder-empty">正在加载小纸条</div>
+            <div v-else-if="selectedNoteItems.length" class="note-list">
+              <article
+                v-for="item in selectedNoteItems"
+                :key="item.id"
+                class="section-card file-card note-card"
+              >
+                <div class="file-header note-card__meta">
+                  <span class="note-card__time mono">{{ formatTime(item.createdAt) }}</span>
+                  <span v-if="item.speaker" class="note-card__speaker">{{ item.speaker }}</span>
+                </div>
+                <div class="markdown-body note-card__content">
+                  <p class="pre-wrap">{{ item.content }}</p>
+                </div>
+              </article>
+            </div>
+            <div v-else class="reminder-empty">这一天还没有小纸条</div>
+          </div>
+        </div>
+      </div>
+    </teleport>
+
+    <teleport to="body">
+      <div v-if="noteDateSheetOpen" class="date-sheet-overlay" @click.self="noteDateSheetOpen = false">
+        <div class="date-sheet">
+          <div class="date-sheet__header">
+            <div>
+              <div class="date-sheet__kicker">纸条日期</div>
+              <h3>{{ selectedNoteDate ? formatConversationDateDisplay(selectedNoteDate) : "选择日期" }}</h3>
+            </div>
+            <button type="button" class="modal-close" aria-label="关闭" @click="noteDateSheetOpen = false">×</button>
+          </div>
+
+          <div class="date-sheet__body">
+            <section v-if="activeNoteCalendarMonth" class="date-calendar section-card">
+              <div class="date-calendar__topbar">
+                <button
+                  type="button"
+                  class="date-calendar__switch"
+                  @click="switchNoteCalendarMonth('older')"
+                >
+                  ‹
+                </button>
+                <div class="date-calendar__title">{{ activeNoteCalendarMonth.monthLabel }}</div>
+                <button
+                  type="button"
+                  class="date-calendar__switch"
+                  @click="switchNoteCalendarMonth('newer')"
+                >
+                  ›
+                </button>
+              </div>
+
+              <div class="date-weekdays">
+                <span
+                  v-for="weekday in calendarWeekdays"
+                  :key="weekday"
+                  class="date-weekdays__item"
+                >
+                  {{ weekday }}
+                </span>
+              </div>
+
+              <div class="date-calendar__grid">
+                <button
+                  v-for="cell in activeNoteCalendarMonth.cells"
+                  :key="cell.key"
+                  type="button"
+                  class="date-chip"
+                  :class="{
+                    'date-chip--placeholder': cell.kind === 'placeholder',
+                    'date-chip--muted': cell.kind === 'day' && !cell.available,
+                    'date-chip--active': cell.date === selectedNoteDate,
+                    'date-chip--today': cell.date === todayDate(),
+                  }"
+                  :disabled="cell.kind !== 'day' || !cell.available"
+                  @click="cell.date && handleNoteDatePick(cell.date)"
+                >
+                  <template v-if="cell.kind === 'day'">
+                    <span class="date-chip__day">{{ cell.dayNumber }}</span>
+                  </template>
+                </button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </teleport>
 
     <teleport to="body">
       <div v-if="reminderSheetOpen" class="date-sheet-overlay" @click.self="reminderSheetOpen = false">
@@ -385,8 +516,8 @@
         <div class="search-sheet">
           <div class="search-sheet__header">
             <div>
-              <div class="date-sheet__kicker">当前日期搜索</div>
-              <h3>{{ selectedDateDisplay }}</h3>
+              <div class="date-sheet__kicker">全局搜索</div>
+              <h3>全部消息</h3>
             </div>
             <button type="button" class="modal-close" aria-label="关闭" @click="closeSearchSheet">×</button>
           </div>
@@ -415,7 +546,7 @@
               @click="jumpToSearchResult(index)"
             >
               <span class="search-result-card__meta">
-                {{ searchResultRoleLabel(result.role) }} · {{ formatTime(result.timestamp) }}
+                {{ formatConversationDateDisplay(result.date) }} · {{ searchResultRoleLabel(result.role) }} · {{ formatTime(result.timestamp) }}
               </span>
               <span class="search-result-card__text">
                 <template v-for="(part, partIndex) in result.snippetParts" :key="`${result.id}:${partIndex}`">
@@ -426,14 +557,14 @@
             </button>
           </div>
           <div v-else class="search-empty">
-            {{ normalizedSearchQuery ? "没有找到匹配消息" : "输入关键词后，只搜索当前日期的对话正文" }}
+            {{ normalizedSearchQuery ? "没有找到匹配消息" : "输入关键词后，搜索全部消息" }}
           </div>
         </div>
       </div>
     </teleport>
 
     <div
-      v-if="showFloatingLauncher && !dateSheetOpen && !hourSheetOpen && !searchSheetOpen && !reminderSheetOpen"
+      v-if="showFloatingLauncher && !dateSheetOpen && !hourSheetOpen && !searchSheetOpen && !reminderSheetOpen && !noteSheetOpen"
       class="floating-actions"
       :class="{ 'floating-actions--open': floatingActionsOpen }"
     >
@@ -442,7 +573,7 @@
           v-if="filteredTranscriptDays.length"
           type="button"
           class="floating-action-button"
-          title="搜索当前日期"
+          title="搜索全部消息"
           @click="handleFloatingAction(openSearchSheet)"
         >
           ⌕
@@ -492,7 +623,7 @@
     </div>
 
     <div
-      v-if="searchDockVisible && !searchSheetOpen && !dateSheetOpen && !hourSheetOpen && !reminderSheetOpen"
+      v-if="searchDockVisible && !searchSheetOpen && !dateSheetOpen && !hourSheetOpen && !reminderSheetOpen && !noteSheetOpen"
       class="search-dock"
     >
       <button
@@ -542,10 +673,16 @@ const error = ref("");
 const daySummaries = ref([]);
 const activeDay = ref(null);
 const state = ref({});
+const noteDates = ref([]);
+const noteDayCache = ref({});
+const noteLoading = ref(false);
 const threadExpanded = ref(false);
 const dateSheetOpen = ref(false);
 const reminderSheetOpen = ref(false);
+const noteSheetOpen = ref(false);
+const noteDateSheetOpen = ref(false);
 const currentCalendarMonth = ref("");
+const currentNoteCalendarMonth = ref("");
 const showFloatingLauncher = ref(false);
 const floatingActionsOpen = ref(false);
 const attachmentObjectUrls = ref({});
@@ -553,11 +690,15 @@ const stickerObjectUrls = ref({});
 const hourSheetOpen = ref(false);
 const searchSheetOpen = ref(false);
 const searchQuery = ref("");
+const searchLoading = ref(false);
+const searchResults = ref([]);
 const activeSearchIndex = ref(-1);
 const activeSearchTargetId = ref("");
 const searchDockPinned = ref(false);
 const searchInputRef = ref(null);
+const selectedNoteDate = ref(todayDate());
 const messageRefs = new Map();
+let searchDebounceTimer = 0;
 
 const calendarWeekdays = ["一", "二", "三", "四", "五", "六", "日"];
 
@@ -568,6 +709,7 @@ const availableConversationDates = computed(() => (
   Array.isArray(daySummaries.value) ? daySummaries.value.map((day) => day.date).filter(Boolean) : []
 ));
 const availableDateSet = computed(() => new Set(availableConversationDates.value));
+const availableNoteDateSet = computed(() => new Set(noteDates.value));
 const selectedDate = ref("");
 const filteredTranscriptDays = computed(() => {
   if (!selectedDate.value) {
@@ -579,6 +721,10 @@ const selectedDateDisplay = computed(() => formatConversationDateDisplay(selecte
 const activeCalendarMonth = computed(() => buildCalendarMonth(
   currentCalendarMonth.value || resolveCalendarMonth(selectedDate.value),
   availableDateSet.value,
+));
+const activeNoteCalendarMonth = computed(() => buildCalendarMonth(
+  currentNoteCalendarMonth.value || resolveCalendarMonth(selectedNoteDate.value),
+  availableNoteDateSet.value,
 ));
 const visibleImageAttachments = computed(() => filteredTranscriptDays.value
   .flatMap((day) => Array.isArray(day?.items) ? day.items : [])
@@ -613,32 +759,12 @@ const hourAnchors = computed(() => {
   return Array.from(groups.values()).sort((left, right) => left.hourLabel.localeCompare(right.hourLabel));
 });
 const normalizedSearchQuery = computed(() => searchQuery.value.trim().toLowerCase());
-const searchableMessages = computed(() => filteredTranscriptDays.value
-  .flatMap((day) => Array.isArray(day?.items) ? day.items : [])
-  .filter((item) => item?.kind === "message")
-  .map((item) => ({
-    id: item.id,
-    role: item.role,
-    timestamp: item.timestamp,
-    text: messageBodyText(item),
-  }))
-  .filter((item) => item.text));
-const searchResults = computed(() => {
-  const query = normalizedSearchQuery.value;
-  if (!query) {
-    return [];
-  }
-  return searchableMessages.value
-    .filter((item) => item.text.toLowerCase().includes(query))
-    .map((item) => ({
-      ...item,
-      snippet: buildSearchSnippet(item.text, query),
-      snippetParts: buildSearchSnippetParts(item.text, query),
-    }));
-});
 const searchStatusText = computed(() => {
   if (!normalizedSearchQuery.value) {
-    return `${searchableMessages.value.length} 条可搜索消息`;
+    return "输入关键词后搜索全部消息";
+  }
+  if (searchLoading.value) {
+    return "搜索中";
   }
   if (!searchResults.value.length) {
     return "0 条结果";
@@ -675,6 +801,19 @@ const reminderItems = computed(() => buildReminderItems(state.value?.reminders))
 const personalReminderItems = computed(() => reminderItems.value.filter((item) => item.group === "personal"));
 const internalReminderItems = computed(() => reminderItems.value.filter((item) => item.group === "internal"));
 const reminderListTitle = computed(() => `${reminderItems.value.length} 条待触发`);
+const selectedNoteItems = computed(() => {
+  const date = String(selectedNoteDate.value || "").trim();
+  if (!date) {
+    return [];
+  }
+  return Array.isArray(noteDayCache.value?.[date]) ? noteDayCache.value[date] : [];
+});
+const noteListTitle = computed(() => {
+  if (!selectedNoteDate.value) {
+    return "选择日期";
+  }
+  return `${formatConversationDateDisplay(selectedNoteDate.value)} · ${selectedNoteItems.value.length} 张`;
+});
 const metaToggleVisible = computed(() => Boolean(reminderSummaryAnyText.value));
 const resolvedMetaMode = computed(() => {
   if (metaMode.value === "auto") {
@@ -687,15 +826,21 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [conversationSummaryResult, stateResult] = await Promise.all([
+    const [conversationSummaryResult, stateResult, noteDateResult] = await Promise.all([
       cyberbossApi.fetchConversationDays(45),
       cyberbossApi.fetchState(),
+      cyberbossApi.fetchNoteDates().catch(() => ({ dates: [] })),
     ]);
     daySummaries.value = Array.isArray(conversationSummaryResult.days) ? conversationSummaryResult.days : [];
     state.value = stateResult || {};
+    noteDates.value = Array.isArray(noteDateResult?.dates) ? noteDateResult.dates : [];
     metaMode.value = "auto";
     const nextDate = resolveDefaultConversationDate(daySummaries.value);
     selectedDate.value = nextDate;
+    selectedNoteDate.value = resolveDefaultNoteDate(noteDates.value);
+    if (selectedNoteDate.value) {
+      await ensureNotesForDate(selectedNoteDate.value);
+    }
     await loadConversationDay(nextDate);
   } catch (err) {
     error.value = err.message;
@@ -739,6 +884,51 @@ function openHourSheet() {
   hourSheetOpen.value = true;
 }
 
+function openNoteSheet() {
+  noteSheetOpen.value = true;
+}
+
+async function pickNoteDate(date) {
+  selectedNoteDate.value = String(date || "").trim();
+  noteDateSheetOpen.value = false;
+  await ensureNotesForDate(selectedNoteDate.value);
+}
+
+async function ensureNotesForDate(date) {
+  const normalizedDate = String(date || "").trim();
+  if (!normalizedDate) {
+    return;
+  }
+  if (Array.isArray(noteDayCache.value?.[normalizedDate])) {
+    return;
+  }
+  noteLoading.value = true;
+  try {
+    const result = await cyberbossApi.fetchNotesByDate(normalizedDate).catch(() => ({ notes: [] }));
+    noteDayCache.value = {
+      ...noteDayCache.value,
+      [normalizedDate]: Array.isArray(result?.notes) ? result.notes : [],
+    };
+  } finally {
+    noteLoading.value = false;
+  }
+}
+
+function handleNoteDatePick(date) {
+  if (!availableNoteDateSet.value.has(date)) {
+    return;
+  }
+  pickNoteDate(date);
+}
+
+function switchNoteCalendarMonth(direction) {
+  const delta = direction === "older" ? -1 : 1;
+  currentNoteCalendarMonth.value = shiftMonthKey(
+    activeNoteCalendarMonth.value?.monthKey || resolveCalendarMonth(selectedNoteDate.value),
+    delta,
+  );
+}
+
 async function openSearchSheet() {
   searchSheetOpen.value = true;
   floatingActionsOpen.value = false;
@@ -754,6 +944,7 @@ function closeSearchSheet() {
 
 function clearSearchSession() {
   searchQuery.value = "";
+  searchResults.value = [];
   activeSearchIndex.value = -1;
   activeSearchTargetId.value = "";
   searchDockPinned.value = false;
@@ -838,6 +1029,15 @@ async function jumpToSearchResult(index) {
   activeSearchIndex.value = index;
   searchSheetOpen.value = false;
   searchDockPinned.value = true;
+  if (String(result.date || "").trim() && result.date !== selectedDate.value) {
+    dayLoading.value = true;
+    try {
+      selectedDate.value = result.date;
+      await loadConversationDay(result.date);
+    } finally {
+      dayLoading.value = false;
+    }
+  }
   await nextTick();
   const element = messageRefs.get(String(result.id || "").trim());
   if (element instanceof HTMLElement) {
@@ -892,9 +1092,11 @@ function buildTranscriptDay(day) {
     }
 
     if (event?.type === "assistant") {
+      const rawText = cleanEventText(event.text || "");
+      const isNoteNotice = looksLikeNoteMessage(rawText);
       const assistantItem = {
         id: event.id,
-        kind: "message",
+        kind: isNoteNotice ? "note-notice" : "message",
         role: "assistant",
         text: event.text,
         timestamp: event.timestamp,
@@ -971,6 +1173,77 @@ function cleanEventText(input) {
   return String(input || "")
     .replace(/^\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\]\s*/u, "")
     .trim();
+}
+
+function looksLikeNoteMessage(text) {
+  return Boolean(parseLeaveNoteAction(text)) || looksLikeNoteNotice(text);
+}
+
+function looksLikeNoteNotice(text) {
+  const normalized = String(text || "").trim();
+  return /^📝\s*收到一张来自.+的小纸条(?:，当前共有\s*\d+\s*张未读)?$/u.test(normalized);
+}
+
+function extractNoteCardLabel(text) {
+  const noteAction = parseLeaveNoteAction(text);
+  if (noteAction) {
+    return noteAction.speaker ? `来自 ${noteAction.speaker}` : "留给你的小纸条";
+  }
+  return extractNoteNoticeLabel(text);
+}
+
+function extractNoteNoticeLabel(text) {
+  const normalized = String(text || "").trim();
+  const match = normalized.match(/^📝\s*收到一张来自(.+?)的小纸条/u);
+  return match?.[1]?.trim() ? `来自 ${match[1].trim()}` : "收到一张小纸条";
+}
+
+function extractNoteCardBody(text) {
+  const noteAction = parseLeaveNoteAction(text);
+  if (noteAction) {
+    return noteAction.content;
+  }
+  return cleanNoteNoticeText(text);
+}
+
+function cleanNoteNoticeText(text) {
+  const normalized = String(text || "").trim();
+  const unreadMatch = normalized.match(/当前共有\s*(\d+)\s*张未读/u);
+  if (unreadMatch?.[1]) {
+    return `已经替你放在这里了。现在还有 ${unreadMatch[1]} 张未读。`;
+  }
+  return "已经替你放在这里了。";
+}
+
+function parseLeaveNoteAction(text) {
+  const normalized = unwrapJsonFence(cleanEventText(text || ""));
+  if (!normalized || !normalized.startsWith("{") || !normalized.endsWith("}")) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(normalized);
+    const action = String(parsed?.action || parsed?.cyberboss_action || "").trim().toLowerCase();
+    if (action !== "leave_note") {
+      return null;
+    }
+    const content = String(parsed?.content || parsed?.note || parsed?.message || parsed?.text || "").trim();
+    if (!content) {
+      return null;
+    }
+    return {
+      content,
+      addressee: String(parsed?.addressee || "").trim(),
+      speaker: String(parsed?.speaker || "").trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function unwrapJsonFence(text) {
+  const normalized = String(text || "").trim();
+  const match = normalized.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/iu);
+  return match ? String(match[1] || "").trim() : normalized;
 }
 
 function normalizeAttachmentsFromMeta(meta) {
@@ -1249,8 +1522,60 @@ function formatReminderSummary(summary, mode = "active") {
       hour12: false,
     }).format(new Date(dueAtMs))
     : "--:--";
-  const label = String(bucket?.next?.text || "").trim() || "提醒";
+  const label = buildReminderSummaryLabel(String(bucket?.next?.text || "").trim()) || "提醒";
   return `${total}条提醒 · ${timeText} ${label}`;
+}
+
+function buildReminderSummaryLabel(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized.startsWith("__cyberboss_daily_diary__|")) {
+    return "日记";
+  }
+  if (normalized.startsWith("__cyberboss_memory_review__|")) {
+    return "记忆回顾";
+  }
+  if (normalized.startsWith("__cyberboss_timeline_confirm__|")) {
+    return "时间轴确认";
+  }
+  if (normalized.startsWith("__cyberboss_sleep__")) {
+    return "睡眠提醒";
+  }
+  if (normalized.startsWith("__cyberboss_presence__")) {
+    return "状态提醒";
+  }
+  if (normalized.startsWith("__cyberboss_")) {
+    return "系统提醒";
+  }
+
+  let summary = normalized
+    .split(/[:：；;，,\n]/u, 1)[0]
+    .replace(/\s+/gu, " ")
+    .trim();
+
+  summary = summary.replace(/\s*(?:1[).、]|一[、.．）)])[\s\S]*$/u, "").trim();
+  summary = summary.replace(/(买|处理|确认|看看|问问|一下)$/u, "").trim();
+
+  if (!summary) {
+    summary = normalized;
+  }
+
+  return truncateDisplayText(summary, 18);
+}
+
+function truncateDisplayText(text, maxLength) {
+  const normalized = String(text || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const limit = Number(maxLength);
+  if (!Number.isFinite(limit) || limit <= 0 || normalized.length <= limit) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
 }
 
 function buildReminderItems(remindersState) {
@@ -1592,6 +1917,14 @@ function resolveDefaultConversationDate(items) {
   return items.find((item) => item.date === today)?.date || items[0]?.date || "";
 }
 
+function resolveDefaultNoteDate(items) {
+  if (!Array.isArray(items) || !items.length) {
+    return todayDate();
+  }
+  const today = todayDate();
+  return items.find((date) => date === today) || items[0] || "";
+}
+
 watch(daySummaries, (nextDays) => {
   if (!Array.isArray(nextDays) || !nextDays.length) {
     selectedDate.value = "";
@@ -1612,6 +1945,24 @@ watch(dateSheetOpen, (open) => {
 
 watch(reminderSheetOpen, (open) => {
   if (open) {
+    floatingActionsOpen.value = false;
+  }
+});
+
+watch(noteSheetOpen, (open) => {
+  if (open) {
+    floatingActionsOpen.value = false;
+    if (selectedNoteDate.value) {
+      ensureNotesForDate(selectedNoteDate.value);
+    }
+  } else {
+    noteDateSheetOpen.value = false;
+  }
+});
+
+watch(noteDateSheetOpen, (open) => {
+  if (open) {
+    currentNoteCalendarMonth.value = resolveCalendarMonth(selectedNoteDate.value);
     floatingActionsOpen.value = false;
   }
 });
@@ -1639,11 +1990,40 @@ watch(searchResults, (results) => {
 });
 
 watch(selectedDate, () => {
-  searchQuery.value = "";
-  activeSearchIndex.value = -1;
   activeSearchTargetId.value = "";
-  searchDockPinned.value = false;
-  searchSheetOpen.value = false;
+});
+
+watch(searchQuery, async (value) => {
+  const normalized = String(value || "").trim();
+  window.clearTimeout(searchDebounceTimer);
+  if (!normalized) {
+    searchResults.value = [];
+    activeSearchIndex.value = -1;
+    searchDockPinned.value = false;
+    searchLoading.value = false;
+    return;
+  }
+  searchLoading.value = true;
+  searchDebounceTimer = window.setTimeout(async () => {
+    try {
+      const result = await cyberbossApi.fetchConversationSearch(normalized, 200);
+      if (String(searchQuery.value || "").trim() !== normalized) {
+        return;
+      }
+      const query = normalized.toLowerCase();
+      searchResults.value = Array.isArray(result?.results)
+        ? result.results.map((item) => ({
+          ...item,
+          snippet: buildSearchSnippet(item.text || "", query),
+          snippetParts: buildSearchSnippetParts(item.text || "", query),
+        }))
+        : [];
+    } finally {
+      if (String(searchQuery.value || "").trim() === normalized) {
+        searchLoading.value = false;
+      }
+    }
+  }, 300);
 });
 
 watch(
@@ -1678,6 +2058,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.clearTimeout(searchDebounceTimer);
   window.removeEventListener("scroll", updateFloatingLauncher);
   window.removeEventListener("resize", updateFloatingLauncher);
   revokeAttachmentUrls();
@@ -1765,6 +2146,37 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   transform-origin: left center;
   transform: rotate(32deg);
+}
+
+.note-trigger__icon {
+  position: relative;
+  width: 14px;
+  height: 11px;
+  border: 1.6px solid currentColor;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.note-trigger__icon::before,
+.note-trigger__icon::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  width: 7px;
+  height: 1.6px;
+  background: currentColor;
+}
+
+.note-trigger__icon::before {
+  left: 0.5px;
+  transform-origin: left center;
+  transform: rotate(35deg);
+}
+
+.note-trigger__icon::after {
+  right: 0.5px;
+  transform-origin: right center;
+  transform: rotate(-35deg);
 }
 
 .conversation-meta {
@@ -1887,7 +2299,8 @@ onBeforeUnmount(() => {
 
 .date-sheet,
 .reminder-sheet {
-  width: min(100%, 420px);
+  width: min(420px, calc(100vw - 36px));
+  max-width: calc(100vw - 36px);
   max-height: min(78vh, 620px);
   display: flex;
   flex-direction: column;
@@ -1896,6 +2309,11 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, #fbf7ef 0%, #f4efe6 100%);
   border-radius: 24px;
   box-shadow: 0 20px 48px rgba(24, 35, 15, 0.18);
+}
+
+.note-sheet {
+  background: linear-gradient(180deg, #fff9ef 0%, #f6eedf 100%);
+  height: min(78vh, 620px);
 }
 
 .date-sheet__header,
@@ -1944,9 +2362,32 @@ onBeforeUnmount(() => {
 
 .reminder-sheet__body {
   overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
   gap: 12px;
   padding-right: 2px;
+}
+
+.note-sheet__body {
+  min-height: 0;
+  gap: 14px;
+}
+
+.note-date-trigger {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.note-date-trigger__icon {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .reminder-group {
@@ -1989,6 +2430,8 @@ onBeforeUnmount(() => {
   color: rgba(49, 81, 30, 0.78);
   font-size: 12px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .reminder-card__main {
@@ -2002,6 +2445,8 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 700;
   line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .reminder-card__detail {
@@ -2019,6 +2464,73 @@ onBeforeUnmount(() => {
   font-size: 13px;
   text-align: center;
   background: rgba(255, 253, 249, 0.48);
+}
+
+.note-date-list {
+  display: grid;
+  gap: 8px;
+}
+
+.note-date-row {
+  appearance: none;
+  border: 1px solid rgba(24, 35, 15, 0.06);
+  border-radius: 16px;
+  padding: 11px 12px;
+  background: rgba(255, 253, 249, 0.84);
+  color: var(--ink);
+  font: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+
+.note-date-row--active {
+  border-color: rgba(49, 81, 30, 0.2);
+  background: rgba(238, 244, 229, 0.72);
+}
+
+.note-group {
+  display: grid;
+  gap: 8px;
+}
+
+.note-list {
+  display: grid;
+  gap: 10px;
+}
+
+.note-card {
+  padding: 14px;
+}
+
+.note-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.note-card__time {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.note-card__speaker {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.note-card__content {
+  font-size: 14px;
+}
+
+.note-card__content p {
+  margin: 0;
 }
 
 .date-calendar {
@@ -2407,6 +2919,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 10px;
   padding: 0 2px;
+  min-width: 0;
 }
 
 .day-divider__meta-wrap {
@@ -2414,18 +2927,24 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
 }
 
 .day-divider__date {
   font-size: 18px;
   font-weight: 700;
   color: var(--ink);
+  flex: 0 0 auto;
 }
 
 .day-divider__meta {
   color: var(--muted);
   font-size: 12px;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: right;
 }
 
 .meta-switch {
@@ -2457,9 +2976,147 @@ onBeforeUnmount(() => {
   justify-items: start;
 }
 
+.chat-row--note-notice {
+  justify-items: center;
+}
+
 .chat-row--search-hit .chat-bubble {
   outline: 2px solid rgba(49, 81, 30, 0.24);
   box-shadow: 0 0 0 6px rgba(238, 244, 229, 0.7);
+}
+
+.chat-row--search-hit .desk-note__sheet {
+  outline: 2px solid rgba(49, 81, 30, 0.2);
+  box-shadow: 0 10px 30px rgba(88, 104, 68, 0.12), 0 0 0 6px rgba(238, 244, 229, 0.7);
+}
+
+.desk-note {
+  width: min(100%, 420px);
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 18px 0 10px;
+  position: relative;
+  filter:
+    drop-shadow(0 4px 16px rgba(88, 72, 47, 0.09))
+    drop-shadow(0 1px 4px rgba(88, 72, 47, 0.04));
+}
+
+.desk-note__kicker {
+  color: rgba(122, 103, 77, 0.72);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.desk-note__sheet {
+  width: 100%;
+  padding: 22px 22px 24px;
+  background: #fffef9;
+  border: 1px solid rgba(180, 160, 120, 0.12);
+  border-radius: 2px;
+  position: relative;
+  box-shadow:
+    0 2px 8px rgba(88, 72, 47, 0.04),
+    0 6px 20px rgba(88, 72, 47, 0.05);
+}
+
+/* folded bottom-right corner */
+.desk-note__sheet::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 0 26px 26px;
+  border-color: transparent transparent #ece3d2 transparent;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.desk-note__sheet > * {
+  position: relative;
+}
+
+.desk-note__sheet > *::selection {
+  background: rgba(210, 181, 126, 0.28);
+}
+
+.desk-note__meta {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 2px 14px;
+  color: rgba(114, 90, 60, 0.78);
+  font-size: 12px;
+  z-index: 1;
+}
+
+.desk-note__from {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.desk-note__body {
+  position: relative;
+  z-index: 1;
+  color: #4d3c29;
+  font-size: 15px;
+  line-height: 2.05;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .date-sheet-overlay {
+    padding: 12px;
+  }
+
+  .reminder-sheet {
+    width: min(100vw - 24px, 420px);
+    max-width: min(100vw - 24px, 420px);
+  }
+
+  .reminder-sheet__body {
+    padding-right: 0;
+  }
+
+  .reminder-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .reminder-card__time {
+    font-size: 11px;
+  }
+
+  .desk-note {
+    width: min(100%, 268px);
+    padding: 10px 0 6px;
+  }
+
+  .desk-note__sheet {
+    padding: 16px 14px 16px;
+  }
+
+  .desk-note__sheet::before {
+    border-width: 0 0 20px 20px;
+  }
+
+  .desk-note__meta {
+    margin: 8px 2px 10px;
+    font-size: 10px;
+  }
+
+  .desk-note__body {
+    font-size: 13px;
+    line-height: 1.8;
+  }
 }
 
 .chat-bubble {

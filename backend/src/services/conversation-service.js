@@ -20,6 +20,46 @@ function listConversationDays(config, { limit = 7 } = {}) {
   };
 }
 
+function searchConversationMessages(config, query, { limit = 200 } = {}) {
+  const normalizedQuery = normalizeText(query).toLowerCase();
+  if (!normalizedQuery) {
+    return { query: "", results: [] };
+  }
+
+  const maxResults = Math.max(1, Number(limit) || 200);
+  const structuredFiles = listConversationRecordFiles(config);
+  const results = [];
+
+  for (const entry of structuredFiles) {
+    const events = parseConversationRecordFile(entry.filePath).sort(compareEvents);
+    const annotated = annotateConversationActions(events);
+    for (const event of annotated) {
+      if (event?.type !== "user" && event?.type !== "assistant") {
+        continue;
+      }
+      const text = normalizeText(event.text);
+      if (!text || !text.toLowerCase().includes(normalizedQuery)) {
+        continue;
+      }
+      results.push({
+        id: event.id,
+        type: event.type,
+        role: event.type,
+        text,
+        timestamp: event.timestamp,
+        date: event.dateKey || deriveDateKey(event.timestamp, entry.fileName.slice(0, 10) || "unknown"),
+        threadId: normalizeText(event.threadId),
+        turnId: normalizeText(event.turnId),
+      });
+      if (results.length >= maxResults) {
+        return { query: normalizedQuery, results: results.sort(compareSearchResultsDesc) };
+      }
+    }
+  }
+
+  return { query: normalizedQuery, results: results.sort(compareSearchResultsDesc) };
+}
+
 function listConversationLogFiles(config) {
   const structuredFiles = listConversationRecordFiles(config);
   if (structuredFiles.length) {
@@ -353,6 +393,15 @@ function compareEvents(left, right) {
   return String(left?.id || "").localeCompare(String(right?.id || ""));
 }
 
+function compareSearchResultsDesc(left, right) {
+  const leftTime = Date.parse(left?.timestamp || "") || 0;
+  const rightTime = Date.parse(right?.timestamp || "") || 0;
+  if (leftTime !== rightTime) {
+    return rightTime - leftTime;
+  }
+  return String(left?.id || "").localeCompare(String(right?.id || ""));
+}
+
 function annotateConversationActions(events) {
   const output = [];
   let pendingActionKeys = new Set();
@@ -535,4 +584,5 @@ module.exports = {
   listConversationDaySummaries,
   getConversationDay,
   listConversationLogFiles,
+  searchConversationMessages,
 };

@@ -10,6 +10,7 @@ const conversationRoutes = require("./routes/conversations");
 const timelineRoutes = require("./routes/timeline");
 const diaryRoutes = require("./routes/diary");
 const memoryRoutes = require("./routes/memory");
+const noteRoutes = require("./routes/notes");
 const stateRoutes = require("./routes/state");
 const stickerRoutes = require("./routes/stickers");
 const weixinInstructionsRoutes = require("./routes/weixin-instructions");
@@ -39,6 +40,7 @@ async function buildServer() {
   await app.register(timelineRoutes);
   await app.register(diaryRoutes);
   await app.register(memoryRoutes);
+  await app.register(noteRoutes);
   await app.register(stateRoutes);
   await app.register(stickerRoutes);
   await app.register(weixinInstructionsRoutes);

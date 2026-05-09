@@ -1359,12 +1359,12 @@ function addDaysToDateKey(dateKey, days) {
 }
 
 function resolveCategoryColor(entry) {
-  const id = String(entry?.categoryId || "").trim();
+  const id = normalizeCategoryColorKey(entry?.categoryId);
   const color = String(entry?.color || "").trim();
   if (color) {
-    return color;
+    return resolveColorValue(color);
   }
-  return CATEGORY_COLORS[id] || "#c6bca8";
+  return resolveColorValue(CATEGORY_COLORS[id] || "#c6bca8");
 }
 
 function resolveSubcategoryColor(entry) {
@@ -1377,7 +1377,7 @@ function resolveSubcategoryColor(entry) {
 }
 
 function resolveCategoryLabel(categoryId, fallbackLabel) {
-  const normalizedId = String(categoryId || "").trim().toLowerCase();
+  const normalizedId = normalizeCategoryColorKey(categoryId);
   const normalizedFallback = String(fallbackLabel || "").trim();
   return CATEGORY_LABELS[normalizedId]
     || CATEGORY_LABELS[normalizedFallback.toLowerCase()]
@@ -1590,6 +1590,14 @@ function resolveColorValue(color) {
     return normalized;
   }
   return CATEGORY_COLOR_VALUES[cssVarMatch[1]] || normalized;
+}
+
+function normalizeCategoryColorKey(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  return normalized.includes(".") ? normalized.split(".")[0] : normalized;
 }
 
 function hashText(value) {

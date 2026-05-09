@@ -20,7 +20,7 @@ function readConfig() {
     cyberbossProjectRoot,
     stateDir,
     logDir,
-    port: Number(process.env.CYBERBOSS_DASHBOARD_PORT) || 3000,
+    port: Number(process.env.CYBERBOSS_DASHBOARD_PORT) || 3011,
     host: normalizeText(process.env.CYBERBOSS_DASHBOARD_HOST) || "0.0.0.0",
     logLevel: normalizeLogLevel(process.env.CYBERBOSS_DASHBOARD_LOG_LEVEL),
     authPassword: normalizeText(process.env.CYBERBOSS_DASHBOARD_AUTH_PASSWORD),
@@ -35,6 +35,7 @@ function readConfig() {
     timelineFactsFile: path.join(stateDir, "timeline", "timeline-facts.json"),
     diaryDir: path.join(stateDir, "diary"),
     memoryDir: path.join(stateDir, "memory"),
+    notesDir: path.join(stateDir, "notes"),
     conversationDir: path.join(stateDir, "conversations"),
     sessionsFile: path.join(stateDir, "sessions.json"),
     runtimeContextFile: path.join(stateDir, "project-tool-runtime-context.json"),
@@ -62,6 +63,12 @@ function readConfig() {
       path.join(stateDir, "weixin-instructions.md"),
       path.join(cyberbossProjectRoot, "templates", "weixin-instructions.md"),
       path.join(projectRoot, "templates", "weixin-instructions.md"),
+    ]),
+    weixinOperationsFile: resolveExistingPath([
+      process.env.CYBERBOSS_WEIXIN_OPERATIONS_FILE,
+      path.join(stateDir, "weixin-operations.md"),
+      path.join(cyberbossProjectRoot, "templates", "weixin-operations.md"),
+      path.join(projectRoot, "templates", "weixin-operations.md"),
     ]),
   };
 }

@@ -8,6 +8,13 @@
 - 不上云端也能在手机或电脑浏览器里查看 `timeline / diary / memory / state / conversation`
 - 把 `thinking`、工具调用、对话消息、提醒和表情包整理成更适合日常查看的移动端界面
 
+## 最近补充的能力
+
+- 对话页继续围绕消息正文展示 `thinking / tool / approval` 等侧挂信息，并支持图片附件预览
+- 对话页增加“小纸条”入口，读取 `~/.cyberboss/notes/YYYY-MM-DD.json`
+- 微信说明页支持在 `weixin-instructions.md` 和 `weixin-operations.md` 之间切换查看
+- 口令登录仍然是可选项，适合个人部署或小范围分享
+
 ## 仓库结构
 
 ```text
@@ -26,8 +33,10 @@ dashboard/
 
 - `timeline / diary / memory / state` 来自 `~/.cyberboss`
 - `conversation` 读取 `~/.cyberboss/conversations/*.jsonl`
+- `notes` 读取 `~/.cyberboss/notes/YYYY-MM-DD.json`
 - 现场页会读取最近定位、电量、天气和表情包索引
 - 对话页会读取提醒队列，并把“和我相关”的下一条提醒放在顶部
+- 微信说明页会读取 `weixin-instructions.md`，如果存在也会读取 `weixin-operations.md`
 
 常见文件包括：
 
@@ -38,6 +47,7 @@ timeline/timeline-taxonomy.json
 timeline/timeline-state.json
 diary/*.md
 memory/*.md
+notes/YYYY-MM-DD.json
 reminder-queue.json
 sessions.json
 sleep-state.json
@@ -48,6 +58,7 @@ stickers/index.json
 stickers/tags.json
 stickers/assets/*
 weixin-instructions.md
+weixin-operations.md
 ```
 
 这个仓库本身不包含你的个人数据，它只是在运行时去读这些目录。不要把自己的 `~/.cyberboss`、截图缓存或对话日志提交到仓库。
@@ -120,6 +131,7 @@ npm start
 - `CYBERBOSS_DASHBOARD_DIST_DIR`
 - `CYBERBOSS_PROJECT_ROOT`
 - `CYBERBOSS_WEIXIN_INSTRUCTIONS_FILE`
+- `CYBERBOSS_WEIXIN_OPERATIONS_FILE`
 
 示例见 `backend/.env.example`。
 
@@ -128,7 +140,7 @@ npm start
 - 后端会自动读取 `backend/.env` 和 `backend/.env.local`
 - shell / pm2 / systemd 注入的同名环境变量优先级更高
 - `CYBERBOSS_DASHBOARD_LOG_LEVEL` 默认建议用 `error`，避免生产窗口刷日志
-- `CYBERBOSS_PROJECT_ROOT` 用来找 `Cyberboss` 模板资源，比如表情包模板和微信说明模板
+- `CYBERBOSS_PROJECT_ROOT` 用来找 `Cyberboss` 模板资源，比如表情包模板、微信说明模板和微信操作模板
 
 ## 鉴权
 
@@ -156,7 +168,7 @@ CYBERBOSS_DASHBOARD_AUTH_PASSWORD=your-password
 - 记忆
 - 现场
 - 状态
-- 微信指令查看
+- 微信说明 / 操作查看
 
 ## 对话页接入 Cyberboss
 
@@ -330,6 +342,12 @@ cyberboss_sticker_send
 - 系统维护：日记、记忆回顾、时间轴确认、其他 `__cyberboss_...` 内部维护任务
 
 小闹钟按钮会展示完整提醒列表。
+
+## 小纸条
+
+- 默认读取 `~/.cyberboss/notes/YYYY-MM-DD.json`
+- 收到纸条时，会把提示整理成更适合查看的卡片插在对话流里
+- 点击对话页右上角纸条按钮，可以按日期查看当天纸条内容
 
 ## 验证
 

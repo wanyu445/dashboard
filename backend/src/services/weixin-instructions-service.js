@@ -13,4 +13,17 @@ function getWeixinInstructions(config) {
   };
 }
 
-module.exports = { getWeixinInstructions };
+function getWeixinOperations(config) {
+  const filePath = String(config.weixinOperationsFile || "").trim();
+  if (!filePath || !fs.existsSync(filePath)) {
+    throw new Error("weixin-operations.md not found");
+  }
+
+  return {
+    fileName: "weixin-operations.md",
+    filePath,
+    text: fs.readFileSync(filePath, "utf8"),
+  };
+}
+
+module.exports = { getWeixinInstructions, getWeixinOperations };
