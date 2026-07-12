@@ -13,7 +13,9 @@ const memoryRoutes = require("./routes/memory");
 const noteRoutes = require("./routes/notes");
 const stateRoutes = require("./routes/state");
 const stickerRoutes = require("./routes/stickers");
+const todoRoutes = require("./routes/todos");
 const weixinInstructionsRoutes = require("./routes/weixin-instructions");
+const phoneRoutes = require("./routes/phone");
 
 async function buildServer() {
   const config = readConfig();
@@ -43,7 +45,9 @@ async function buildServer() {
   await app.register(noteRoutes);
   await app.register(stateRoutes);
   await app.register(stickerRoutes);
+  await app.register(todoRoutes);
   await app.register(weixinInstructionsRoutes);
+  await app.register(phoneRoutes);
 
   if (config.siteAvailable) {
     await app.register(fastifyStatic, {

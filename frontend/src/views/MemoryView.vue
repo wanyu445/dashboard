@@ -5,7 +5,7 @@
       <p class="page-subtitle">这里用来查看已经整理好的记忆文件，按你现在的使用习惯直接读，不打断原本的记忆结构。</p>
 
       <button
-        v-if="files.length && !loadingFiles && !error"
+        v-if="tree && !loadingTree && !error"
         type="button"
         class="memory-select-trigger"
         @click="pickerOpen = true"
@@ -15,7 +15,7 @@
       </button>
     </section>
 
-    <van-loading v-if="loadingFiles" size="24px" vertical>加载中</van-loading>
+    <van-loading v-if="loadingTree" size="24px" vertical>加载中</van-loading>
     <van-notice-bar v-else-if="error" color="#8b1538" background="#fdecef" :text="error" />
 
     <template v-else>
@@ -44,16 +44,14 @@
           </div>
 
           <div class="picker-sheet__body">
-            <button
-              v-for="file in files"
-              :key="file"
-              type="button"
-              class="picker-item"
-              :class="{ 'picker-item--active': file === selectedFile }"
-              @click="handlePick(file)"
-            >
-              {{ file }}
-            </button>
+            <TreeNode
+              v-for="child in tree.children"
+              :key="child.name"
+              :node="child"
+              :depth="0"
+              :selected-file="selectedFile"
+              @select="handlePick"
+            />
           </div>
         </div>
       </div>
@@ -62,28 +60,107 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from "vue";
+import { onMounted, ref, watch, h } from "vue";
 import { cyberbossApi } from "../api/cyberboss";
 
-const loadingFiles = ref(false);
+const TreeNode = {
+  name: "TreeNode",
+  props: {
+    node: { type: Object, required: true },
+    depth: { type: Number, default: 0 },
+    selectedFile: { type: String, default: "" },
+  },
+  emits: ["select"],
+  setup(props, { emit }) {
+    const isOpen = ref(props.depth === 0);
+    const isDir = props.node.type === "directory";
+
+    function toggle() {
+      if (isDir) {
+        isOpen.value = !isOpen.value;
+      }
+    }
+
+    function handleClick() {
+      if (!isDir && props.node.path) {
+        emit("select", props.node.path);
+      }
+      toggle();
+    }
+
+    return () => {
+      const children = [];
+      const indent = { paddingLeft: `${16 + props.depth * 16}px` };
+
+      const icon = isDir ? (isOpen.value ? "▼" : "▶") : "";
+      const fileIcon = isDir ? "📁" : "📄";
+      const isActive = props.node.path && props.node.path === props.selectedFile;
+
+      children.push(
+        h("button", {
+          type: "button",
+          class: ["tree-item", isActive ? "tree-item--active" : ""],
+          style: indent,
+          onClick: handleClick,
+        }, [
+          h("span", { class: "tree-item__icon" }, icon),
+          h("span", { class: "tree-item__file-icon" }, fileIcon),
+          h("span", { class: "tree-item__name" }, props.node.name),
+        ])
+      );
+
+      if (isDir && isOpen.value && props.node.children) {
+        for (const child of props.node.children) {
+          children.push(
+            h(TreeNode, {
+              key: child.name,
+              node: child,
+              depth: props.depth + 1,
+              selectedFile: props.selectedFile,
+              onSelect: (path) => emit("select", path),
+            })
+          );
+        }
+      }
+
+      return h("div", children);
+    };
+  },
+};
+
+const loadingTree = ref(false);
 const error = ref("");
-const files = ref([]);
+const tree = ref(null);
 const selectedFile = ref("");
 const current = ref({});
 const pickerOpen = ref(false);
 
-async function loadFiles() {
-  loadingFiles.value = true;
+async function loadTree() {
+  loadingTree.value = true;
   error.value = "";
   try {
     const result = await cyberbossApi.fetchMemoryFiles();
-    files.value = Array.isArray(result.files) ? result.files : [];
-    selectedFile.value = files.value[0] || "";
+    tree.value = result.tree || null;
+    if (tree.value && !selectedFile.value) {
+      const firstFile = findFirstFile(tree.value);
+      if (firstFile) selectedFile.value = firstFile;
+    }
   } catch (err) {
     error.value = err.message;
   } finally {
-    loadingFiles.value = false;
+    loadingTree.value = false;
   }
+}
+
+function findFirstFile(node) {
+  if (node.type === "file") return node.path || "";
+  if (node.children) {
+    for (const child of node.children) {
+      const found = findFirstFile(child);
+      if (found) return found;
+    }
+  }
+  return "";
 }
 
 async function loadCurrent() {
@@ -255,7 +332,7 @@ watch(selectedFile, () => {
 });
 
 onMounted(async () => {
-  await loadFiles();
+  await loadTree();
   await loadCurrent();
 });
 </script>
@@ -361,28 +438,58 @@ onMounted(async () => {
 }
 
 .picker-sheet__body {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   overflow-y: auto;
 }
 
-.picker-item {
+.tree-item {
   appearance: none;
-  border: 1px solid rgba(24, 35, 15, 0.08);
-  border-radius: 14px;
-  min-height: 44px;
-  padding: 0 12px;
-  background: rgba(255, 253, 249, 0.92);
+  border: none;
+  border-radius: 10px;
+  min-height: 40px;
+  padding: 6px 12px;
+  background: transparent;
   color: var(--ink);
   font: inherit;
   font-size: 14px;
   text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
 }
 
-.picker-item--active {
+.tree-item:hover {
+  background: rgba(24, 35, 15, 0.04);
+}
+
+.tree-item--active {
   background: #eef4e5;
-  border-color: rgba(49, 81, 30, 0.2);
   color: var(--accent);
+  font-weight: 600;
+}
+
+.tree-item__icon {
+  width: 16px;
+  font-size: 10px;
+  color: var(--muted);
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.tree-item__file-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.tree-item__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-card {

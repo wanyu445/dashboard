@@ -9,6 +9,10 @@ const HEADER_MAP = new Map([
   ["[Approval]", "approval"],
 ]);
 
+function resolveArchiveDir(config) {
+  return path.join(config.stateDir, "memory", "archive");
+}
+
 function listConversationDays(config, { limit = 7 } = {}) {
   const daySummaries = listConversationDaySummaries(config, { limit });
   const days = daySummaries
@@ -69,7 +73,18 @@ function listConversationLogFiles(config) {
 }
 
 function listConversationDaySummaries(config, { limit = 31 } = {}) {
-  const structuredFiles = listConversationRecordFiles(config);
+  const archiveFiles = listArchiveConversationFiles(config);
+  if (archiveFiles.length) {
+    return archiveFiles
+      .slice(0, Math.max(1, Number(limit) || 31))
+      .map((entry) => ({
+        date: entry.fileName.slice(0, 10),
+        label: entry.fileName.slice(0, 10),
+        source: "archive",
+      }));
+  }
+
+  const structuredFiles = listStructuredConversationFiles(config);
   if (structuredFiles.length) {
     return structuredFiles
       .slice(0, Math.max(1, Number(limit) || 31))
@@ -102,6 +117,18 @@ function getConversationDay(config, date) {
   const normalizedDate = normalizeDateKey(date);
   if (!normalizedDate) {
     return null;
+  }
+
+  const archiveDir = resolveArchiveDir(config);
+  const archivePath = path.join(archiveDir, `${normalizedDate}.jsonl`);
+  if (fs.existsSync(archivePath) && fs.statSync(archivePath).isFile()) {
+    const events = parseConversationRecordFile(archivePath).sort(compareEvents);
+    return buildConversationDay({
+      date: normalizedDate,
+      label: normalizedDate,
+      files: [path.basename(archivePath)],
+      events,
+    });
   }
 
   const structuredPath = path.join(config.conversationDir, `${normalizedDate}.jsonl`);
@@ -149,6 +176,14 @@ function buildConversationDay({ date, label, files = [], events = [] }) {
 }
 
 function listConversationRecordFiles(config) {
+  const archiveFiles = listArchiveConversationFiles(config);
+  if (archiveFiles.length) {
+    return archiveFiles;
+  }
+  return listStructuredConversationFiles(config);
+}
+
+function listStructuredConversationFiles(config) {
   if (!fs.existsSync(config.conversationDir)) {
     return [];
   }
@@ -158,6 +193,23 @@ function listConversationRecordFiles(config) {
       fileName: entry.name,
       filePath: path.join(config.conversationDir, entry.name),
       startedAt: `${entry.name.slice(0, 10)}T00:00:00+08:00`,
+      source: "structured",
+    }))
+    .sort((left, right) => right.fileName.localeCompare(left.fileName));
+}
+
+function listArchiveConversationFiles(config) {
+  const archiveDir = resolveArchiveDir(config);
+  if (!fs.existsSync(archiveDir)) {
+    return [];
+  }
+  return fs.readdirSync(archiveDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /^\d{4}-\d{2}-\d{2}\.jsonl$/u.test(entry.name))
+    .map((entry) => ({
+      fileName: entry.name,
+      filePath: path.join(archiveDir, entry.name),
+      startedAt: `${entry.name.slice(0, 10)}T00:00:00+08:00`,
+      source: "archive",
     }))
     .sort((left, right) => right.fileName.localeCompare(left.fileName));
 }

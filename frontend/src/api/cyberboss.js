@@ -72,4 +72,16 @@ export const cyberbossApi = {
   fetchWeixinInstructions() {
     return client.get("/weixin-instructions");
   },
+  fetchTodos() {
+    return client.get("/todos");
+  },
+  createTodo({ title, description }) {
+    return client.post("/todos", { title, description });
+  },
+  updateTodo(id, data) {
+    return client.patch(`/todos/${encodeURIComponent(id)}`, data);
+  },
+  deleteTodo(id) {
+    return client.delete(`/todos/${encodeURIComponent(id)}`);
+  },
 };

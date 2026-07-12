@@ -1,14 +1,44 @@
 const fs = require("fs");
 const path = require("path");
 
-function listMemoryFiles(config) {
+function listMemoryTree(config) {
   if (!fs.existsSync(config.memoryDir)) {
-    return [];
+    return null;
   }
-  return fs.readdirSync(config.memoryDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && /^[A-Za-z0-9._-]+\.md$/u.test(entry.name))
-    .map((entry) => entry.name)
-    .sort((left, right) => left.localeCompare(right));
+  return buildTreeNode(config.memoryDir, config.memoryDir);
+}
+
+function buildTreeNode(baseDir, currentDir) {
+  const name = path.basename(currentDir) || path.relative(baseDir, currentDir) || ".";
+  const entries = fs.readdirSync(currentDir, { withFileTypes: true })
+    .filter((entry) => !entry.name.startsWith("."))
+    .sort((a, b) => {
+      if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+  const children = [];
+  for (const entry of entries) {
+    const fullPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      const subNode = buildTreeNode(baseDir, fullPath);
+      if (subNode.children.length > 0) {
+        children.push(subNode);
+      }
+    } else if (entry.isFile() && /\.md$/iu.test(entry.name)) {
+      children.push({
+        name: entry.name,
+        type: "file",
+        path: path.relative(baseDir, fullPath).replace(/\\/g, "/"),
+      });
+    }
+  }
+
+  return {
+    name,
+    type: "directory",
+    children,
+  };
 }
 
 function readMemoryFile(config, fileName) {
@@ -21,18 +51,22 @@ function readMemoryFile(config, fileName) {
 }
 
 function resolveMemoryFile(memoryDir, fileName) {
-  const normalized = String(fileName || "").trim();
-  if (!normalized || path.basename(normalized) !== normalized || !/^[A-Za-z0-9._-]+\.md$/u.test(normalized)) {
-    throw new Error(`invalid file name: ${fileName}`);
+  const normalized = String(fileName || "").trim().replace(/\\/g, "/");
+  if (!normalized) {
+    throw new Error("file name is required");
   }
-  const filePath = path.join(memoryDir, normalized);
-  if (!fs.existsSync(filePath)) {
+  const candidate = path.join(memoryDir, normalized);
+  const resolved = path.resolve(candidate);
+  if (!resolved.startsWith(path.resolve(memoryDir) + path.sep) && resolved !== path.resolve(memoryDir)) {
+    throw new Error(`path traversal blocked: ${fileName}`);
+  }
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
     throw new Error(`file not found: ${normalized}`);
   }
-  return filePath;
+  return resolved;
 }
 
 module.exports = {
-  listMemoryFiles,
+  listMemoryTree,
   readMemoryFile,
 };

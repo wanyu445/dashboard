@@ -6,6 +6,7 @@
       <van-tabbar-item icon="clock-o" to="/timeline">时间轴</van-tabbar-item>
       <van-tabbar-item icon="description-o" to="/diary">日记</van-tabbar-item>
       <van-tabbar-item icon="notes-o" to="/memory">记忆</van-tabbar-item>
+      <van-tabbar-item icon="todo-list-o" to="/todos">待办</van-tabbar-item>
       <van-tabbar-item icon="location-o" to="/notes">现场</van-tabbar-item>
     </van-tabbar>
   </div>

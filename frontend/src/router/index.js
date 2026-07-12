@@ -9,6 +9,7 @@ const routes = [
   { path: "/diary", name: "diary", component: () => import("../views/DiaryView.vue") },
   { path: "/memory", name: "memory", component: () => import("../views/MemoryView.vue") },
   { path: "/notes", name: "notes", component: () => import("../views/NotesView.vue") },
+  { path: "/todos", name: "todos", component: () => import("../views/TodoView.vue") },
   { path: "/state", name: "state", component: () => import("../views/StateView.vue") },
   { path: "/weixin-instructions", name: "weixin-instructions", component: () => import("../views/WeixinInstructionsView.vue") },
 ];

@@ -8,11 +8,11 @@ export default defineConfig({
     port: 5174,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:3011",
+        target: "http://127.0.0.1:3010",
         changeOrigin: true,
       },
       "/timeline-site": {
-        target: "http://127.0.0.1:3011",
+        target: "http://127.0.0.1:3010",
         changeOrigin: true,
       },
     },
