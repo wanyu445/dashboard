@@ -10,12 +10,12 @@ const path = require("path");
 
 async function conversationRoutes(app) {
   app.get("/api/conversations", async (req) => {
-    const limit = Number(req.query.limit) || 7;
+    const limit = req.query.limit != null ? Number(req.query.limit) : 7;
     return listConversationDays(app.config, { limit });
   });
 
   app.get("/api/conversations/days", async (req) => {
-    const limit = Number(req.query.limit) || 31;
+    const limit = req.query.limit != null ? Number(req.query.limit) : 31;
     return {
       days: listConversationDaySummaries(app.config, { limit }),
     };

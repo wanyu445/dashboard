@@ -73,10 +73,11 @@ function listConversationLogFiles(config) {
 }
 
 function listConversationDaySummaries(config, { limit = 31 } = {}) {
+  const effectiveLimit = Math.max(0, Number(limit) || 31);
   const archiveFiles = listArchiveConversationFiles(config);
   if (archiveFiles.length) {
-    return archiveFiles
-      .slice(0, Math.max(1, Number(limit) || 31))
+    const sliced = effectiveLimit > 0 ? archiveFiles.slice(0, effectiveLimit) : archiveFiles;
+    return sliced
       .map((entry) => ({
         date: entry.fileName.slice(0, 10),
         label: entry.fileName.slice(0, 10),
@@ -86,8 +87,8 @@ function listConversationDaySummaries(config, { limit = 31 } = {}) {
 
   const structuredFiles = listStructuredConversationFiles(config);
   if (structuredFiles.length) {
-    return structuredFiles
-      .slice(0, Math.max(1, Number(limit) || 31))
+    const sliced = effectiveLimit > 0 ? structuredFiles.slice(0, effectiveLimit) : structuredFiles;
+    return sliced
       .map((entry) => ({
         date: entry.fileName.slice(0, 10),
         label: entry.fileName.slice(0, 10),
@@ -110,7 +111,7 @@ function listConversationDaySummaries(config, { limit = 31 } = {}) {
   }
   return Array.from(grouped.values())
     .sort((left, right) => right.date.localeCompare(left.date))
-    .slice(0, Math.max(1, Number(limit) || 31));
+    .slice(0, Math.max(1, effectiveLimit || 31));
 }
 
 function getConversationDay(config, date) {

@@ -827,7 +827,7 @@ async function load() {
   error.value = "";
   try {
     const [conversationSummaryResult, stateResult, noteDateResult] = await Promise.all([
-      cyberbossApi.fetchConversationDays(45),
+      cyberbossApi.fetchConversationDays(0),
       cyberbossApi.fetchState(),
       cyberbossApi.fetchNoteDates().catch(() => ({ dates: [] })),
     ]);
